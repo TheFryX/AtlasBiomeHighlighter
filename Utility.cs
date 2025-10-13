@@ -199,6 +199,19 @@ namespace AtlasBiomeHighlighter
                 return true;
             }
 
+            // 1.5) Area.Name for normal maps
+            try
+            {
+                var rootEl = nd.Element;
+                var area = GetMember(rootEl, "Area");
+                var areaName = ExtractString(GetMember(area, "Name"));
+                if (!string.IsNullOrWhiteSpace(areaName))
+                {
+                    name = areaName.Trim();
+                    return true;
+                }
+            } catch {}
+
             try
             {
                 var root = nd.Element;
@@ -276,6 +289,19 @@ namespace AtlasBiomeHighlighter
         {
             var a = (int)Math.Round(Math.Clamp(opacity01, 0f, 1f) * 255f);
             return Color.FromArgb(a, baseColor);
+        }
+
+        public static bool TryGetNodeId(AtlasNodeDescription nd, out string? id)
+        {
+            id = null;
+            try
+            {
+                var root = nd.Element;
+                if (root == null) return false;
+                id = ExtractString(GetMember(root, "Id")) ?? ExtractString(GetMember(GetMember(root, "Area"), "Id"));
+                return !string.IsNullOrWhiteSpace(id);
+            }
+            catch { return false; }
         }
     }
 }

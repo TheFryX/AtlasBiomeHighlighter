@@ -6,6 +6,8 @@ namespace AtlasBiomeHighlighter
 {
     public partial class AtlasBiomeHighlighter
     {
+        private string _preferredFilter = string.Empty;
+
         public override void DrawSettings()
         {
             var s = Settings;
@@ -76,6 +78,39 @@ namespace AtlasBiomeHighlighter
                 ImGui.Separator();
                 ImGui.TextDisabled("Alpha jest sterowana globalnie przez \"Opacity\".");
             }
-        }
+        
+            if (ImGui.CollapsingHeader("Preferred maps", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+
+                bool highlight = s.HighlightPreferredMaps.Value;
+                if (ImGui.Checkbox("Highlight Preferred maps", ref highlight))
+                    s.HighlightPreferredMaps.Value = highlight;
+
+                Vector4 pref = new Vector4(
+                    s.PreferredMapRingColor.Value.R / 255f,
+                    s.PreferredMapRingColor.Value.G / 255f,
+                    s.PreferredMapRingColor.Value.B / 255f,
+                    1f);
+                if (ImGui.ColorEdit4("Preferred ring", ref pref))
+                    s.PreferredMapRingColor.Value = System.Drawing.Color.FromArgb(
+                        (int)(pref.X * 255),
+                        (int)(pref.Y * 255),
+                        (int)(pref.Z * 255));
+
+                ImGui.TextDisabled("Select preferred map names:");
+                ImGui.InputText("Filter##preferred", ref _preferredFilter, 128);
+                ImGui.BeginChild("##preferred_maps_child", new Vector2(0, 220), ImGuiChildFlags.Border, ImGuiWindowFlags.None);
+                foreach (var kv in s.PreferredMaps.ToList())
+                {
+                    if (!string.IsNullOrEmpty(_preferredFilter) && kv.Key.IndexOf(_preferredFilter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    bool on = kv.Value.Value;
+                    if (ImGui.Checkbox(kv.Key, ref on))
+                        kv.Value.Value = on;
+                }
+                ImGui.EndChild();
+            }
+}
     }
 }

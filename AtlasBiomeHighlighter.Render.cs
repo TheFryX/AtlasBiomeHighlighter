@@ -20,6 +20,7 @@ namespace AtlasBiomeHighlighter
                 // Specials bypass biome filter
                 bool biomeVisible = Settings.Visible.TryGetValue(biome, out var on) && on.Value;
                 var __sflags = Utility.TryGetSpecialFlags(nd);
+                bool isDeadly = (__sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
                 bool specialWanted =
                     ((__sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
                     ((__sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
@@ -27,10 +28,42 @@ namespace AtlasBiomeHighlighter
                     ((__sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
                     ((__sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value);
 
-                if (!biomeVisible && !specialWanted)
-                    continue;
+                
 
-                if (!Settings.Colors.TryGetValue(biome, out var colorNode))
+
+
+                
+
+// Preferred maps (by name or by id), ignoring Deadly
+string? anyName = null;
+string? preferredName = null;
+bool preferredWanted = false;
+if (Settings.HighlightPreferredMaps.Value && !isDeadly && Utility.TryGetAnyMapName(nd, out anyName) && !string.IsNullOrWhiteSpace(anyName))
+{
+    foreach (var kv in Settings.PreferredMaps)
+    {
+        if (!kv.Value.Value) continue;
+        var key = kv.Key;
+        bool nameHit = string.Equals(key, anyName, System.StringComparison.OrdinalIgnoreCase) ||
+                       (anyName?.IndexOf(key, System.StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+                       (key?.IndexOf(anyName ?? string.Empty, System.StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
+
+        bool idHit = false;
+        if (!nameHit && Utility.TryGetNodeId(nd, out var nid) && !string.IsNullOrWhiteSpace(nid))
+            idHit = nid!.IndexOf(key, System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+        if (nameHit || idHit)
+        {
+            preferredWanted = true;
+            preferredName = anyName ?? key;
+            break;
+        }
+    }
+}
+
+if (!biomeVisible && !(specialWanted || preferredWanted))
+    continue;
+if (!Settings.Colors.TryGetValue(biome, out var colorNode))
                     continue;
 
                 var ringColor = Utility.WithOpacity(colorNode.Value, Settings.Opacity.Value);
@@ -42,6 +75,17 @@ var center = new System.Numerics.Vector2(nd.Element.Center.X, nd.Element.Center.
 
                 var sflags = __sflags;
                 int extra = 0;
+                if (preferredWanted)
+                {
+                    var c = Utility.WithOpacity(Settings.PreferredMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    Graphics.DrawCircle(center, radius + (++extra)*2, c, Settings.SpecialRingThickness.Value, 24);
+                }
+                if (preferredWanted)
+                {
+                    var c = Utility.WithOpacity(Settings.PreferredMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    Graphics.DrawCircle(center, radius + (++extra)*2, c, Settings.SpecialRingThickness.Value, 24);
+                }
+
 if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value)
                 {
                     var c = Utility.WithOpacity(Settings.UniqueMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
@@ -86,7 +130,8 @@ if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMa
                         if ((sf & Utility.SpecialFlags.MomentofZen) != 0) text += " [Moment Of Zen]";
                         if ((sf & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
                         if ((sf & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
-                    }
+                        if (preferredWanted) { var __p = preferredName ?? anyName ?? "Preferred"; text += $" [Preferred {__p}]"; }
+                        }
                     var size = Graphics.MeasureText(text); // API-compatible
                     var pos = new System.Numerics.Vector2(center.X - size.X / 2f, center.Y - (radius + Settings.LabelOffset.Value));
                     var textColor = Settings.LabelUseBiomeColor.Value ? ringColor : Settings.LabelTextColor.Value;
