@@ -10,6 +10,11 @@ namespace AtlasBiomeHighlighter
 
         public override void DrawSettings()
         {
+            // Hide completed maps toggle
+            {
+}
+
+
             var s = Settings;
 
             ImGui.TextDisabled("Core");
@@ -21,6 +26,25 @@ namespace AtlasBiomeHighlighter
             { float v = s.Opacity.Value; if (ImGui.SliderFloat("Opacity", ref v, s.Opacity.Min, s.Opacity.Max)) s.Opacity.Value = v; }
             { bool v = s.ShowLabels.Value; if (ImGui.Checkbox("Show labels", ref v)) s.ShowLabels.Value = v; }
             { bool v = s.DebugMode.Value; if (ImGui.Checkbox("Debug mode", ref v)) s.DebugMode.Value = v; }
+
+            if (ImGui.CollapsingHeader("Hide completed / Attempted / Locked"))
+            {
+                ImGui.Indent();
+                {
+                    bool hideCompleted = Settings.HideCompletedMaps.Value;
+                    if (ImGui.Checkbox("Hide completed maps", ref hideCompleted))
+                        Settings.HideCompletedMaps.Value = hideCompleted;
+
+                    bool hideAttempted = Settings.HideAttemptedMaps.Value;
+                    if (ImGui.Checkbox("Hide attempted maps", ref hideAttempted))
+                        Settings.HideAttemptedMaps.Value = hideAttempted;
+                                    bool hideLocked = Settings.HideLockedMaps.Value;
+                    if (ImGui.Checkbox("Hide locked maps", ref hideLocked))
+                        Settings.HideLockedMaps.Value = hideLocked;
+}
+                ImGui.Unindent();
+            }
+
 
             if (ImGui.CollapsingHeader("Special highlights (strict)", ImGuiTreeNodeFlags.DefaultOpen))
             {

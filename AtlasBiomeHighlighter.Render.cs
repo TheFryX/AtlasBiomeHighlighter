@@ -14,6 +14,24 @@ namespace AtlasBiomeHighlighter
 
             foreach (var nd in _visibleNodes)
             {
+                // Hide overlay for completed nodes
+                if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(nd)) continue;
+                // Hide overlay for attempted nodes
+                if (Settings.HideAttemptedMaps.Value && Utility.IsMapAttempted(nd)) continue;
+                // Hide overlay for locked/unavailable nodes
+                if (Settings.HideLockedMaps.Value && Utility.IsMapLocked(nd)) continue;
+
+                // Hide overlay for completed (green) nodes
+                if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(nd))
+                    continue;
+                // Hide overlay for attempted nodes
+                if (Settings.HideAttemptedMaps.Value && Utility.IsMapAttempted(nd))
+                    continue;
+
+                // Hide overlay for completed (green) nodes
+                if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(nd))
+                    continue;
+
                 
                 var biome = Utility.TryGetBiome(nd);
 

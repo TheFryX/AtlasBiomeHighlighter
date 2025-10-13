@@ -303,5 +303,69 @@ namespace AtlasBiomeHighlighter
             }
             catch { return false; }
         }
+
+        public static bool IsMapCompleted(AtlasNodeDescription nd)
+        {
+            try
+            {
+                var root = nd.Element;
+                if (root == null) return false;
+                var isCompletedObj = GetMember(root, "IsCompleted");
+                return isCompletedObj is bool completed && completed;
+            }
+            catch { return false; }
+        }
+
+        public static bool IsMapAttempted(AtlasNodeDescription nd)
+        {
+            try
+            {
+                var root = nd.Element;
+                if (root == null) return false;
+
+                var direct = GetMember(root, "IsAttempted") ?? GetMember(root, "Attempted") ?? GetMember(root, "HasAttempted");
+                if (direct is bool ab) return ab;
+
+                bool visited = false;
+                var vObj = GetMember(root, "IsVisited") ?? GetMember(root, "Visited");
+                if (vObj is bool vb) visited = vb;
+
+                bool unlocked = false;
+                var uObj = GetMember(root, "IsUnlocked") ?? GetMember(root, "Unlocked");
+                if (uObj is bool ub) unlocked = ub;
+
+                return visited && !unlocked;
+            }
+            catch { return false; }
+        }
+
+        public static bool IsMapLocked(AtlasNodeDescription nd)
+        {
+            try
+            {
+                var root = nd.Element;
+                if (root == null) return false;
+
+                // Prefer explicit flags
+                var locked = GetMember(root, "IsLocked") ?? GetMember(root, "Locked");
+                if (locked is bool lb) return lb;
+
+                // Unlocked flag (negated)
+                var unlocked = GetMember(root, "IsUnlocked") ?? GetMember(root, "Unlocked");
+                if (unlocked is bool ub) return !ub;
+
+                // Accessibility / discovery as hints
+                var accessible = GetMember(root, "IsAccessible") ?? GetMember(root, "Accessible");
+                if (accessible is bool ac) return !ac;
+
+                var discovered = GetMember(root, "IsDiscovered") ?? GetMember(root, "Discovered");
+                if (discovered is bool dc) return !dc;
+
+                // Last resort: consider "locked" when not visited & not unlocked
+                bool visited = (GetMember(root, "IsVisited") ?? GetMember(root, "Visited")) is bool vb && vb;
+                return !visited;
+            }
+            catch { return false; }
+        }
     }
 }

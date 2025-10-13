@@ -17,6 +17,15 @@ namespace AtlasBiomeHighlighter
         public ToggleNode ShowLabels { get; set; } = new(true);
         public ToggleNode DebugMode { get; set; } = new(false);
 
+    // Hide overlay on completed (green) atlas nodes
+        public ToggleNode HideCompletedMaps { get; set; } = new(false);
+
+    // Hide overlay on 'Attempted' atlas nodes
+        public ToggleNode HideAttemptedMaps { get; set; } = new(false);
+
+    // Hide overlay on locked/unavailable nodes
+        public ToggleNode HideLockedMaps { get; set; } = new(false);
+
 
         // Special highlights (strict/low-noise)
         public ToggleNode HighlightDeadlyBoss { get; set; } = new(true);
@@ -115,7 +124,6 @@ namespace AtlasBiomeHighlighter
         public RangeNode<float> SpecialAlphaMultiplier { get; set; } = new(0.85f, 0.1f, 1.0f);
         public ToggleNode ShowUniqueNameOnLabel { get; set; } = new(true);
         public ToggleNode ShowSpecialTag { get; set; } = new(true);
-public ExileCore2.Shared.Nodes.ColorNode PowerfulBossRingColor { get; set; } = new(System.Drawing.Color.FromArgb(255, 140, 0));
         public ToggleNode HighlightAbyssOverrun { get; set; } = new(true);
         public ExileCore2.Shared.Nodes.ColorNode AbyssOverrunRingColor { get; set; } = new(System.Drawing.Color.FromArgb(0, 206, 209));
         public ToggleNode HighlightMomentofZen { get; set; } = new(true);
