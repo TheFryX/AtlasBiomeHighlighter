@@ -124,7 +124,21 @@ namespace AtlasBiomeHighlighter
                 ImGui.TextDisabled("Select preferred map names:");
                 ImGui.InputText("Filter##preferred", ref _preferredFilter, 128);
                 ImGui.BeginChild("##preferred_maps_child", new Vector2(0, 220), ImGuiChildFlags.Border, ImGuiWindowFlags.None);
-                foreach (var kv in s.PreferredMaps.ToList())
+                
+                ImGui.Separator();
+                bool pg = s.PreferredGuideLines.Value;
+                if (ImGui.Checkbox("Draw Preferred guide lines", ref pg)) s.PreferredGuideLines.Value = pg;
+                bool po = s.PreferredGuideOnlyOffscreen.Value;
+                if (ImGui.Checkbox("Only when off-screen", ref po)) s.PreferredGuideOnlyOffscreen.Value = po;
+                bool pc = s.PreferredGuideFromScreenCenter.Value;
+                if (ImGui.Checkbox("Origin at screen center", ref pc)) s.PreferredGuideFromScreenCenter.Value = pc;
+                int th = s.PreferredGuideThickness.Value;
+                if (ImGui.SliderInt("Guide thickness", ref th, 1, 8)) s.PreferredGuideThickness.Value = th;
+                int ar = s.PreferredArrowSize.Value;
+                if (ImGui.SliderInt("Arrow size", ref ar, 6, 28)) s.PreferredArrowSize.Value = ar;
+                int gl = s.PreferredGuideLimit.Value;
+                if (ImGui.SliderInt("Max guide count", ref gl, 5, 200)) s.PreferredGuideLimit.Value = gl;
+    foreach (var kv in s.PreferredMaps.ToList())
                 {
                     if (!string.IsNullOrEmpty(_preferredFilter) && kv.Key.IndexOf(_preferredFilter, System.StringComparison.OrdinalIgnoreCase) < 0)
                         continue;

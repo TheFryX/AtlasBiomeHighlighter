@@ -9,8 +9,8 @@ namespace AtlasBiomeHighlighter
     {
         public ToggleNode Enable { get; set; } = new(false);
 
-        public RangeNode<int> AtlasRefreshMs { get; set; } = new(5000, 500, 30000);
-        public RangeNode<int> ScreenRefreshMs { get; set; } = new(500, 50, 5000);
+        public RangeNode<int> AtlasRefreshMs { get; set; } = new(200, 50, 30000);
+        public RangeNode<int> ScreenRefreshMs { get; set; } = new(200, 50, 5000);
         public RangeNode<int> NodeRadius { get; set; } = new(20, 4, 40);
         public RangeNode<int> RingThickness { get; set; } = new(3, 1, 12);
         public RangeNode<float> Opacity { get; set; } = new(0.8f, 0.05f, 1.0f);
@@ -36,6 +36,15 @@ namespace AtlasBiomeHighlighter
         public ColorNode UniqueMapRingColor { get; set; } = new(Color.FromArgb(255, 165, 0));
         public ToggleNode HighlightPreferredMaps { get; set; } = new(true);
         public ColorNode PreferredMapRingColor { get; set; } = new(Color.FromArgb(0, 206, 209)); // teal
+
+        // Directional guides to Preferred maps
+        public ToggleNode PreferredGuideLines { get; set; } = new(true);
+        public ToggleNode PreferredGuideOnlyOffscreen { get; set; } = new(false);
+        public ToggleNode PreferredGuideFromScreenCenter { get; set; } = new(true);
+        public RangeNode<int> PreferredGuideThickness { get; set; } = new(2, 1, 8);
+        public RangeNode<int> PreferredArrowSize { get; set; } = new(12, 6, 28);
+        public RangeNode<int> PreferredGuideLimit { get; set; } = new(40, 5, 200);
+    
         
         // User-selectable preferred map names
         public Dictionary<string, ToggleNode> PreferredMaps { get; set; } = new()
@@ -44,7 +53,7 @@ namespace AtlasBiomeHighlighter
             ["Savannah - Best"] = new(false),
             ["Fortress - Good"] = new(false),
             ["Penitentiary"] = new(false),
-            ["Lost Towers"] = new(false),
+            ["Lost Towers - Tower"] = new(false),
             ["Sandspit - Best"] = new(false),
             ["Forge"] = new(false),
             ["Sulphuric Caverns - Good"] = new(false),
@@ -68,13 +77,12 @@ namespace AtlasBiomeHighlighter
             ["Cenotes - Good"] = new(false),
             ["Hidden Grotto - Good"] = new(false),
             ["Ravine - Good"] = new(false),
-            ["Alpine Ridge"] = new(false),
+            ["Alpine Ridge - Tower"] = new(false),
             ["Augury"] = new(false),
             ["Bastille"] = new(false),
             ["Creek - Best"] = new(false),
             ["Crimson Shores - Good"] = new(false),
             ["Decay - Good"] = new(false),
-            ["Derelict Mansion"] = new(false),
             ["Deserted"] = new(false),
             ["Grimhaven"] = new(false),
             ["Hive - Good"] = new(false),
@@ -83,7 +91,7 @@ namespace AtlasBiomeHighlighter
             ["Oasis - Good"] = new(false),
             ["Outlands"] = new(false),
             ["Rockpools"] = new(false),
-            ["Sinking Spire"] = new(false),
+            ["Sinking Spire - Tower"] = new(false),
             ["Vaal Village"] = new(false),
             ["Rustbowl - Best"] = new(false),
             ["Backwash - good"] = new(false),
@@ -93,8 +101,8 @@ namespace AtlasBiomeHighlighter
             ["Channel"] = new(false),
             ["Molten Vault"] = new(false),
             ["The Assembly"] = new(false),
-            ["Mesa"] = new(false),
-            ["Bluff"] = new(false),
+            ["Mesa - Tower"] = new(false),
+            ["Bluff - Tower"] = new(false),
             ["Azmerian Ranges"] = new(false),
             ["Frozen Falls"] = new(false),
             ["Trenches"] = new(false),
@@ -112,12 +120,30 @@ namespace AtlasBiomeHighlighter
             ["Stronghold"] = new(false),
             ["Rupture"] = new(false),
             ["Spring"] = new(false),
-            ["Wayward Isle"] = new(false),
+            ["Wayward Isle - Best"] = new(false),
             ["Epitaph"] = new(false),
             ["Cliffside"] = new(false),
             ["Sinkhole"] = new(false),
             ["Caldera"] = new(false),
             ["Flotsam"] = new(false),
+            ["The Stone Citadel"] = new(false),
+            ["The Iron Citadel"] = new(false),
+            ["The Copper Citadel"] = new(false),
+            ["Castaway"] = new(false),
+            ["Untainted Paradise"] = new(false),
+            ["Vaults of Kamasa"] = new(false),
+            ["The Viridian Wildwood"] = new(false),
+            ["The Silent Cave"] = new(false),
+            ["Merchant's Campsite"] = new(false),
+            ["Moment of Zen"] = new(false),
+            ["Limestone Hideout"] = new(false),
+            ["Felled Hideout"] = new(false),
+            ["Shrine Hideout"] = new(false),
+            ["Canal Hideout"] = new(false),
+            ["The Jade Isles - Boss"] = new(false),
+            ["Sacred Reservoir - Boss"] = new(false),
+            ["Sealed Vault - Boss"] = new(false),
+            ["Derelict Mansion - Boss"] = new(false),
         };
 
         public RangeNode<int> SpecialRingThickness { get; set; } = new(4, 1, 12);

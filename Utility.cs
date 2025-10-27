@@ -367,5 +367,38 @@ namespace AtlasBiomeHighlighter
             }
             catch { return false; }
         }
+    
+        public static bool TryIsVisited(AtlasNodeDescription nd, out bool visited)
+        {
+            visited = false;
+            try
+            {
+                var root = nd.Element;
+                if (root == null) return false;
+                var v = GetMember(root, "IsVisited") ?? GetMember(root, "Visited") ?? GetMember(root, "HasVisited")
+                        ?? (GetMember(root, "Area") is object area ? (GetMember(area, "IsVisited") ?? GetMember(area, "Visited")) : null);
+                if (v is bool b) { visited = b; return true; }
+                return false;
+            }
+            catch { return false; }
+        }
+
+        public static bool TryIsUnlocked(AtlasNodeDescription nd, out bool unlocked)
+        {
+            unlocked = false;
+            try
+            {
+                var root = nd.Element;
+                if (root == null) return false;
+                var u = GetMember(root, "IsUnlocked") ?? GetMember(root, "Unlocked")
+                        ?? (GetMember(root, "Area") is object area ? (GetMember(area, "IsUnlocked") ?? GetMember(area, "Unlocked")) : null);
+                if (u is bool b) { unlocked = b; return true; }
+                var l = GetMember(root, "IsLocked") ?? GetMember(root, "Locked");
+                if (l is bool lb) { unlocked = !lb; return true; }
+                return false;
+            }
+            catch { return false; }
+        }
+
     }
 }
