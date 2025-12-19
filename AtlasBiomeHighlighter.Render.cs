@@ -13,6 +13,9 @@ namespace AtlasBiomeHighlighter
             if (!Settings.Enable.Value) return;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
 
+            // Keep preferred-map matching caches hot-path allocation-free.
+            EnsurePreferredCacheUpToDate();
+
             // Preferred map directional guides
             try
             {
@@ -21,20 +24,25 @@ namespace AtlasBiomeHighlighter
                     var origin = new System.Numerics.Vector2(BorderX / 2f, BorderY / 2f); // AtlasPanel.Element.Center unavailable in this API; use screen center
                     var ringColor = Settings.PreferredMapRingColor.Value;
                     int drawn = 0;
-                    var __pref = new System.Collections.Generic.HashSet<string>(
-                        Settings.PreferredMaps.Where(kv => kv.Value.Value).Select(kv => kv.Key.Split('-')[0].Trim()),
-                        System.StringComparer.OrdinalIgnoreCase
-                    );
 
                     foreach (var nd in _atlasNodes)
                     {
                         if (drawn >= Settings.PreferredGuideLimit.Value) break;
                         if (nd?.Element is null) continue;
 
-                        // Determine if preferred
-                        string? anyName;
-                        if (!Utility.TryGetAnyMapName(nd, out anyName) || string.IsNullOrWhiteSpace(anyName)) continue;
-                        if (!__pref.Contains(anyName)) continue;
+                        // Determine if preferred using cached tokens (no per-frame string allocations).
+                        if (!TryGetCachedNodeTokens(nd, out var nameToken, out _)) continue;
+                        if (nameToken.Length == 0) continue;
+
+                        bool match = _preferredTokensExact.Contains(nameToken);
+                        if (!match)
+                        {
+                            for (int i = 0; i < _preferredTokensList.Length; i++)
+                            {
+                                if (Utility.TokenContainsEitherWay(nameToken, _preferredTokensList[i])) { match = true; break; }
+                            }
+                        }
+                        if (!match) continue;
 
                     if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(nd)) continue;
                     if (Settings.HideAttemptedMaps.Value && Utility.IsMapAttempted(nd)) continue;
@@ -112,38 +120,41 @@ namespace AtlasBiomeHighlighter
                     ((__sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
                     ((__sflags & Utility.SpecialFlags.AbyssOverrun) != 0 && Settings.HighlightAbyssOverrun.Value) ||
                     ((__sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
-                    ((__sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value);
+                    ((__sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value) ||
+                    ((__sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value);
 
-                // Preferred maps (by name or by id), ignoring Deadly
-                string? anyName = null;
-                string? preferredName = null;
+                // Preferred maps (by normalized name token or by id token), ignoring Deadly.
                 bool preferredWanted = false;
-                if (Settings.HighlightPreferredMaps.Value && !isDeadly && Utility.TryGetAnyMapName(nd, out anyName) && !string.IsNullOrWhiteSpace(anyName))
+                string? preferredMatchedToken = null;
+                if (Settings.HighlightPreferredMaps.Value && !isDeadly && TryGetCachedNodeTokens(nd, out var nameToken2, out var idToken2))
                 {
-                    foreach (var kv in Settings.PreferredMaps)
+                    // Exact match first.
+                    if (nameToken2.Length != 0 && _preferredTokensExact.Contains(nameToken2))
                     {
-                        if (!kv.Value.Value) continue;
-                        var key = kv.Key;
-                        bool nameHit =
-                            string.Equals(key, anyName, System.StringComparison.OrdinalIgnoreCase) ||
-                            (anyName?.IndexOf(key, System.StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
-                            (key?.IndexOf(anyName ?? string.Empty, System.StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
-
-                        bool idHit = false;
-                        if (!nameHit && Utility.TryGetNodeId(nd, out var nid) && !string.IsNullOrWhiteSpace(nid))
-                            idHit = nid!.IndexOf(key, System.StringComparison.OrdinalIgnoreCase) >= 0;
-
-                        if (nameHit || idHit)
+                        preferredWanted = true;
+                        preferredMatchedToken = nameToken2;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < _preferredTokensList.Length; i++)
                         {
-                            preferredWanted = true;
-                            preferredName = anyName ?? key;
-                            break;
+                            var keyToken = _preferredTokensList[i];
+                            if (keyToken.Length == 0) continue;
+                            if (nameToken2.Length != 0 && Utility.TokenContainsEitherWay(nameToken2, keyToken))
+                            {
+                                preferredWanted = true;
+                                preferredMatchedToken = keyToken;
+                                break;
+                            }
+                            if (!preferredWanted && idToken2.Length != 0 && idToken2.Contains(keyToken, System.StringComparison.Ordinal))
+                            {
+                                preferredWanted = true;
+                                preferredMatchedToken = keyToken;
+                                break;
+                            }
                         }
-
-                        // PREFERRED_GUIDES
                     }
                 }
-
                 if (!biomeVisible && !(specialWanted || preferredWanted))
                     continue;
                 if (!Settings.Colors.TryGetValue(biome, out var colorNode))
@@ -159,11 +170,6 @@ namespace AtlasBiomeHighlighter
                 var sflags = __sflags;
                 int extra = 0;
 
-                if (preferredWanted)
-                {
-                    var c = Utility.WithOpacity(Settings.PreferredMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
-                    Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
-                }
                 if (preferredWanted)
                 {
                     var c = Utility.WithOpacity(Settings.PreferredMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
@@ -196,6 +202,12 @@ namespace AtlasBiomeHighlighter
                     Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
                 }
 
+                
+                if ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value)
+                {
+                    var c = Utility.WithOpacity(Settings.CleansedRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
+                }
                 if (Settings.ShowLabels.Value)
                 {
                     string text;
@@ -226,12 +238,13 @@ namespace AtlasBiomeHighlighter
                         if ((sf & Utility.SpecialFlags.DeadlyBoss) != 0) text += " [Deadly]";
                         if ((sf & Utility.SpecialFlags.AbyssOverrun) != 0) text += " [Abyss]";
                         if ((sf & Utility.SpecialFlags.MomentofZen) != 0) text += " [Moment Of Zen]";
+                        if ((sf & Utility.SpecialFlags.Cleansed) != 0) text += " [Cleansed]";
                         if ((sf & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
                         if ((sf & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
                         if (preferredWanted)
                         {
-                            var __p = preferredName ?? anyName ?? "Preferred";
-                            text += $" [Preferred {__p}]";
+                            // Include the matched preferred display name (cached) for clarity.
+                            text += " " + GetPreferredTag(preferredMatchedToken);
                         }
                     }
 

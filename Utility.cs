@@ -9,6 +9,59 @@ namespace AtlasBiomeHighlighter
 {
     internal static class Utility
     {
+	        /// <summary>
+	        /// Normalizes a user-facing or internal identifier into a comparison token:
+	        /// lower-case, alphanumeric only (spaces/punctuation removed).
+	        /// </summary>
+	        public static string NormalizeToken(string? value)
+	        {
+	            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+	            var span = value.AsSpan();
+	            // Fast path: if already simple, avoid allocating intermediary builders.
+	            // We still allocate the final string.
+	            Span<char> buf = span.Length <= 256 ? stackalloc char[span.Length] : new char[span.Length];
+	            int n = 0;
+	            for (int i = 0; i < span.Length; i++)
+	            {
+	                var ch = span[i];
+	                if (char.IsLetterOrDigit(ch))
+	                    buf[n++] = char.ToLowerInvariant(ch);
+	            }
+	            return n == 0 ? string.Empty : new string(buf.Slice(0, n));
+	        }
+
+	        /// <summary>
+	        /// Takes a PreferredMaps dictionary key (option label) and returns the token used for matching.
+	        /// Convention: everything before '-' is treated as the map name; suffix is a tag (e.g., "- Best").
+	        /// </summary>
+	        public static string PreferredKeyToToken(string key)
+	        {
+	            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+	            var main = key;
+	            var dash = key.IndexOf('-');
+	            if (dash >= 0) main = key.Substring(0, dash);
+	            return NormalizeToken(main);
+	        }
+
+
+                /// <summary>
+                /// Extracts a human-friendly display name from a Preferred maps option key.
+                /// Example: "Savannah - Best" -> "Savannah".
+                /// </summary>
+                public static string PreferredKeyToDisplayName(string key)
+                {
+                    if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+                    var main = key;
+                    var dash = key.IndexOf('-');
+                    if (dash >= 0) main = key.Substring(0, dash);
+                    return main.Trim();
+                }
+
+	        public static bool TokenContainsEitherWay(string a, string b)
+	        {
+	            if (a.Length == 0 || b.Length == 0) return false;
+	            return a.Contains(b, StringComparison.Ordinal) || b.Contains(a, StringComparison.Ordinal);
+	        }
         public static bool IsInScreen(AtlasNodeDescription node, int width, int height)
         {
             var c = node.Element.Center;
@@ -90,6 +143,7 @@ namespace AtlasBiomeHighlighter
             UniqueMap = 1 << 2,
             AbyssOverrun = 1 << 4,
             MomentofZen = 1 << 5,
+            Cleansed = 1 << 6,
         }
 
         public static SpecialFlags TryGetSpecialFlags(AtlasNodeDescription nd)
@@ -177,6 +231,9 @@ namespace AtlasBiomeHighlighter
             if (u.Contains("ATLASICONCONTENTABYSSOVERRUN")) flags |= SpecialFlags.AbyssOverrun;
             // Trader (Moment of Zen / Merchant)
             if (u.Contains("ATLASICONCONTENTTRADER")) { flags |= SpecialFlags.MomentofZen; flags &= ~SpecialFlags.UniqueMap; }
+
+            // Cleansed/Sanctified area icon (per screenshot): AtlasIconContentSanctification.dds
+            if (u.Contains("ATLASICONCONTENTSANCTIFICATION")) { flags |= SpecialFlags.Cleansed; flags &= ~SpecialFlags.UniqueMap; }
         }
 
         public static bool TryGetUniqueNameFromId(AtlasNodeDescription nd, out string? display)
@@ -191,6 +248,20 @@ namespace AtlasBiomeHighlighter
         public static bool TryGetAnyMapName(AtlasNodeDescription nd, out string? name)
         {
             name = null;
+
+	            // Some special atlas content nodes have no visible label text (Text/TextNoTags == null).
+	            // For Preferred maps matching we still want a stable name.
+	            var sflags = TryGetSpecialFlags(nd);
+	            if ((sflags & SpecialFlags.CorruptedNexus) != 0)
+	            {
+	                name = "Corrupted Nexus";
+	                return true;
+	            }
+	            if ((sflags & SpecialFlags.Cleansed) != 0)
+	            {
+	                name = "Cleansed";
+	                return true;
+	            }
 
             // 1) Unique Id mapping
             if (TryGetUniqueNameFromId(nd, out var unm) && !string.IsNullOrWhiteSpace(unm))

@@ -7,12 +7,16 @@ namespace AtlasBiomeHighlighter
     public partial class AtlasBiomeHighlighter
     {
         private string _preferredFilter = string.Empty;
+        private string _newPreferredGroupName = "New Group";
+        private string _renamePreferredGroupName = string.Empty;
+        private int _selectedPreferredGroup;
+        private bool _renamePreferredGroupPopupOpen;
 
         public override void DrawSettings()
         {
             // Hide completed maps toggle
             {
-}
+        }
 
 
             var s = Settings;
@@ -41,7 +45,7 @@ namespace AtlasBiomeHighlighter
                                     bool hideLocked = Settings.HideLockedMaps.Value;
                     if (ImGui.Checkbox("Hide locked maps", ref hideLocked))
                         Settings.HideLockedMaps.Value = hideLocked;
-}
+            }
                 ImGui.Unindent();
             }
 
@@ -52,6 +56,7 @@ namespace AtlasBiomeHighlighter
                 { bool v = s.HighlightAbyssOverrun.Value; if (ImGui.Checkbox("Highlight Abyss Overrun", ref v)) s.HighlightAbyssOverrun.Value = v; }
                 { bool v = s.HighlightMomentofZen.Value; if (ImGui.Checkbox("Highlight Moment of Zen", ref v)) s.HighlightMomentofZen.Value = v; }
                 { bool v = s.HighlightCorruptedNexus.Value; if (ImGui.Checkbox("Highlight Corrupted Nexus", ref v)) s.HighlightCorruptedNexus.Value = v; }
+                { bool v = s.HighlightCleansed.Value; if (ImGui.Checkbox("Highlight Cleansed", ref v)) s.HighlightCleansed.Value = v; }
                 { bool v = s.HighlightUniqueMaps.Value; if (ImGui.Checkbox("Highlight Unique maps", ref v)) s.HighlightUniqueMaps.Value = v; }
 
                 { int v = s.SpecialRingThickness.Value; if (ImGui.SliderInt("Special ring thickness", ref v, s.SpecialRingThickness.Min, s.SpecialRingThickness.Max)) s.SpecialRingThickness.Value = v; }
@@ -66,6 +71,8 @@ namespace AtlasBiomeHighlighter
                 if (ImGui.ColorEdit4("Moment of Zen ring", ref vec)) s.MomentofZenRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
                 vec = new Vector4(s.CorruptedNexusRingColor.Value.R/255f, s.CorruptedNexusRingColor.Value.G/255f, s.CorruptedNexusRingColor.Value.B/255f, 1f);
                 if (ImGui.ColorEdit4("Corrupted Nexus ring", ref vec)) s.CorruptedNexusRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
+                vec = new Vector4(s.CleansedRingColor.Value.R/255f, s.CleansedRingColor.Value.G/255f, s.CleansedRingColor.Value.B/255f, 1f);
+                if (ImGui.ColorEdit4("Cleansed ring", ref vec)) s.CleansedRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
                 vec = new Vector4(s.UniqueMapRingColor.Value.R/255f, s.UniqueMapRingColor.Value.G/255f, s.UniqueMapRingColor.Value.B/255f, 1f);
                 if (ImGui.ColorEdit4("Unique map ring", ref vec)) s.UniqueMapRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
 
@@ -105,6 +112,22 @@ namespace AtlasBiomeHighlighter
         
             if (ImGui.CollapsingHeader("Preferred maps", ImGuiTreeNodeFlags.DefaultOpen))
             {
+                // Ensure groups exist (back-compat if user opens settings before Initialise()).
+                MigratePreferredGroupsIfNeeded();
+
+                var groups = Settings.PreferredMapGroups;
+                if (groups == null)
+                {
+                    Settings.PreferredMapGroups = groups = new System.Collections.Generic.List<PreferredMapGroup>();
+                }
+                if (groups.Count == 0)
+                {
+                    groups.Add(new PreferredMapGroup { Name = "Default", Enabled = true });
+                }
+
+                if (_selectedPreferredGroup < 0) _selectedPreferredGroup = 0;
+                if (_selectedPreferredGroup >= groups.Count) _selectedPreferredGroup = groups.Count - 1;
+
 
                 bool highlight = s.HighlightPreferredMaps.Value;
                 if (ImGui.Checkbox("Highlight Preferred maps", ref highlight))
@@ -121,10 +144,96 @@ namespace AtlasBiomeHighlighter
                         (int)(pref.Y * 255),
                         (int)(pref.Z * 255));
 
-                ImGui.TextDisabled("Select preferred map names:");
+                ImGui.Separator();
+                ImGui.TextDisabled("Map Groups:");
+
+                // Create group
+                ImGui.SetNextItemWidth(220);
+                ImGui.InputText("##preferred_new_group", ref _newPreferredGroupName, 64);
+                ImGui.SameLine();
+                if (ImGui.Button("Add Group"))
+                {
+                    var name = string.IsNullOrWhiteSpace(_newPreferredGroupName) ? "New Group" : _newPreferredGroupName.Trim();
+                    groups.Add(new PreferredMapGroup { Name = name, Enabled = true });
+                    _selectedPreferredGroup = groups.Count - 1;
+                }
+
+                // Group tabs/buttons (avoid overlap: Selectable width must be explicit; also keep stable unique IDs)
+                ImGui.SameLine();
+                const float tabBarHeight = 26f;
+                // IMPORTANT: Dear ImGui requires EndChild() to be called whenever BeginChild() is called,
+                // even if BeginChild() returns false. Not doing so can corrupt the ImGui stack and crash the loader.
+                bool tabsOpen = ImGui.BeginChild("##preferred_group_tabs", new Vector2(0, tabBarHeight), ImGuiChildFlags.Border, ImGuiWindowFlags.HorizontalScrollbar);
+                if (tabsOpen)
+                {
+                    float avail = ImGui.GetContentRegionAvail().X;
+                    float startX = ImGui.GetCursorPosX();
+                    for (int i = 0; i < groups.Count; i++)
+                    {
+                        var g = groups[i];
+                        ImGui.PushID(i);
+
+                        string tabText = $"{g.Name} [{(g.Enabled ? "ON" : "OFF")}]";
+                        float w = ImGui.CalcTextSize(tabText).X + 16f; // padding
+                        float x = ImGui.GetCursorPosX() - startX;
+                        if (x + w > avail && x > 0)
+                            ImGui.NewLine();
+
+                        if (ImGui.Selectable(tabText, _selectedPreferredGroup == i, ImGuiSelectableFlags.None, new Vector2(w, 0)))
+                            _selectedPreferredGroup = i;
+
+                        ImGui.SameLine(0, 6f);
+                        ImGui.PopID();
+                    }
+                }
+                ImGui.EndChild();
+
+                var activeGroup = groups[_selectedPreferredGroup];
+
+                // Group actions
+                ImGui.Indent();
+                bool enabled = activeGroup.Enabled;
+                if (ImGui.Checkbox("Enable this group", ref enabled)) activeGroup.Enabled = enabled;
+                ImGui.SameLine();
+                if (ImGui.Button("Rename"))
+                {
+                    _renamePreferredGroupName = activeGroup.Name;
+                    _renamePreferredGroupPopupOpen = true;
+                    ImGui.OpenPopup("RenamePreferredGroupPopup");
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Delete Group") && groups.Count > 1)
+                {
+                    groups.RemoveAt(_selectedPreferredGroup);
+                    if (_selectedPreferredGroup >= groups.Count) _selectedPreferredGroup = groups.Count - 1;
+                }
+
+                if (_renamePreferredGroupPopupOpen && ImGui.BeginPopupModal("RenamePreferredGroupPopup", ref _renamePreferredGroupPopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
+                {
+                    ImGui.TextDisabled("New name:");
+                    ImGui.SetNextItemWidth(280);
+                    ImGui.InputText("##rename_pref_group", ref _renamePreferredGroupName, 64);
+                    if (ImGui.Button("OK"))
+                    {
+                        var nn = string.IsNullOrWhiteSpace(_renamePreferredGroupName) ? activeGroup.Name : _renamePreferredGroupName.Trim();
+                        activeGroup.Name = nn;
+                        _renamePreferredGroupPopupOpen = false;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Cancel"))
+                    {
+                        _renamePreferredGroupPopupOpen = false;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    ImGui.EndPopup();
+                }
+                ImGui.Unindent();
+
+                ImGui.TextDisabled("Select maps for this group:");
                 ImGui.InputText("Filter##preferred", ref _preferredFilter, 128);
                 ImGui.BeginChild("##preferred_maps_child", new Vector2(0, 220), ImGuiChildFlags.Border, ImGuiWindowFlags.None);
-                
+
                 ImGui.Separator();
                 bool pg = s.PreferredGuideLines.Value;
                 if (ImGui.Checkbox("Draw Preferred guide lines", ref pg)) s.PreferredGuideLines.Value = pg;
@@ -138,17 +247,21 @@ namespace AtlasBiomeHighlighter
                 if (ImGui.SliderInt("Arrow size", ref ar, 6, 28)) s.PreferredArrowSize.Value = ar;
                 int gl = s.PreferredGuideLimit.Value;
                 if (ImGui.SliderInt("Max guide count", ref gl, 5, 200)) s.PreferredGuideLimit.Value = gl;
-    foreach (var kv in s.PreferredMaps.ToList())
+
+                foreach (var key in s.PreferredMaps.Keys.OrderBy(k => k, System.StringComparer.OrdinalIgnoreCase))
                 {
-                    if (!string.IsNullOrEmpty(_preferredFilter) && kv.Key.IndexOf(_preferredFilter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                    if (!string.IsNullOrEmpty(_preferredFilter) && key.IndexOf(_preferredFilter, System.StringComparison.OrdinalIgnoreCase) < 0)
                         continue;
 
-                    bool on = kv.Value.Value;
-                    if (ImGui.Checkbox(kv.Key, ref on))
-                        kv.Value.Value = on;
+                    bool on = activeGroup.Maps.Contains(key);
+                    if (ImGui.Checkbox(key, ref on))
+                    {
+                        if (on) activeGroup.Maps.Add(key);
+                        else activeGroup.Maps.Remove(key);
+                    }
                 }
                 ImGui.EndChild();
             }
-}
+        }
     }
 }

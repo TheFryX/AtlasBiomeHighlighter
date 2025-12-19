@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
-using ExileCore2.Shared.Nodes;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
 
 namespace AtlasBiomeHighlighter
@@ -12,25 +10,16 @@ namespace AtlasBiomeHighlighter
         private AtlasNodeDescription? _guideNode;
         private Vector2 _guideSmoothedPos;
         private bool _guideHasPos;
-        private string _guidePrefKeyHash = string.Empty;
+        private int _guidePrefHash;
 
-        private static string BuildPrefKeyHash(IEnumerable<KeyValuePair<string, ToggleNode>> prefs)
-        {
-            var names = prefs.Where(kv => kv.Value.Value)
-                             .Select(kv => kv.Key.Split('-')[0].Trim())
-                             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
-            return string.Join("|", names);
-        }
-
-        private bool TryPickOrUpdateGuideTarget(HashSet<string> enabled, Vector2 origin, out Vector2 targetPos)
+        private bool TryPickOrUpdateGuideTarget(HashSet<string> enabledTokens, Vector2 origin, out Vector2 targetPos)
         {
             targetPos = default;
             if (_atlasNodes == null) return false;
 
             if (_guideNode?.Element != null
-                && Utility.TryGetAnyMapName(_guideNode, out var currName)
-                && !string.IsNullOrWhiteSpace(currName)
-                && enabled.Contains(currName))
+                && TryGetCachedNodeTokens(_guideNode, out var currNameToken, out var currIdToken)
+                && (enabledTokens.Contains(currNameToken) || (currIdToken.Length != 0 && enabledTokens.Contains(currIdToken))))
             {
                 targetPos = new Vector2(_guideNode.Element.Center.X, _guideNode.Element.Center.Y);
             }
@@ -41,8 +30,8 @@ namespace AtlasBiomeHighlighter
                 foreach (var node in _atlasNodes)
                 {
                     if (node?.Element is null) continue;
-                    if (!Utility.TryGetAnyMapName(node, out var nm) || string.IsNullOrWhiteSpace(nm)) continue;
-                    if (!enabled.Contains(nm)) continue;
+                    if (!TryGetCachedNodeTokens(node, out var nmToken, out var idToken)) continue;
+                    if (!enabledTokens.Contains(nmToken) && (idToken.Length == 0 || !enabledTokens.Contains(idToken))) continue;
 
                     if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(node)) continue;
                     if (Settings.HideAttemptedMaps.Value && Utility.IsMapAttempted(node)) continue;
@@ -78,26 +67,22 @@ namespace AtlasBiomeHighlighter
             if (!Settings.HighlightPreferredMaps.Value || !Settings.PreferredGuideLines.Value)
                 return;
 
+            EnsurePreferredCacheUpToDate();
+
             var origin = new Vector2(BorderX / 2f, BorderY / 2f);
             var color = Settings.PreferredMapRingColor.Value;
             int thickness = Settings.PreferredGuideThickness.Value;
             int arrowSize = Settings.PreferredArrowSize.Value;
 
-            var keyHash = BuildPrefKeyHash(Settings.PreferredMaps);
-            if (!string.Equals(keyHash, _guidePrefKeyHash, StringComparison.Ordinal))
+            if (_preferredCacheHash != _guidePrefHash)
             {
-                _guidePrefKeyHash = keyHash;
+                _guidePrefHash = _preferredCacheHash;
                 _guideNode = null;
                 _guideHasPos = false;
             }
 
-            var enabled = new HashSet<string>(
-                Settings.PreferredMaps.Where(kv => kv.Value.Value)
-                                      .Select(kv => kv.Key.Split('-')[0].Trim()),
-                StringComparer.OrdinalIgnoreCase);
-
-            if (enabled.Count == 0) return;
-            if (!TryPickOrUpdateGuideTarget(enabled, origin, out var pos)) return;
+            if (_preferredTokensExact.Count == 0) return;
+            if (!TryPickOrUpdateGuideTarget(_preferredTokensExact, origin, out var pos)) return;
 
             var dir = pos - origin;
             var len = dir.Length();

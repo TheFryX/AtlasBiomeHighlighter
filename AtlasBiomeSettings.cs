@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using ExileCore2.Shared.Interfaces;
@@ -5,6 +6,25 @@ using ExileCore2.Shared.Nodes;
 
 namespace AtlasBiomeHighlighter
 {
+    /// <summary>
+    /// A user-defined group of preferred maps. Enabled groups are unioned for matching/highlighting.
+    /// Persisted in settings JSON.
+    /// </summary>
+    public sealed class PreferredMapGroup
+    {
+        public string Name { get; set; } = "New Group";
+
+        /// <summary>
+        /// Whether this group contributes to the active Preferred-map set.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Selected map keys (same labels as in <see cref="AtlasBiomeSettings.PreferredMaps"/>).
+        /// </summary>
+        public HashSet<string> Maps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
     public class AtlasBiomeSettings : ISettings
     {
         public ToggleNode Enable { get; set; } = new(false);
@@ -32,6 +52,8 @@ namespace AtlasBiomeHighlighter
         public ColorNode DeadlyBossRingColor { get; set; } = new(Color.FromArgb(220, 60, 60));
         public ToggleNode HighlightCorruptedNexus { get; set; } = new(true);
         public ColorNode CorruptedNexusRingColor { get; set; } = new(Color.FromArgb(160, 32, 240));
+        public ToggleNode HighlightCleansed { get; set; } = new(true);
+        public ColorNode CleansedRingColor { get; set; } = new(Color.FromArgb(255, 255, 255));
         public ToggleNode HighlightUniqueMaps { get; set; } = new(true);
         public ColorNode UniqueMapRingColor { get; set; } = new(Color.FromArgb(255, 165, 0));
         public ToggleNode HighlightPreferredMaps { get; set; } = new(true);
@@ -45,10 +67,16 @@ namespace AtlasBiomeHighlighter
         public RangeNode<int> PreferredArrowSize { get; set; } = new(12, 6, 28);
         public RangeNode<int> PreferredGuideLimit { get; set; } = new(40, 5, 200);
     
-        
-        // User-selectable preferred map names
+        // Preferred map groups (tabs). Enabled groups are unioned.
+        // Backwards compatible: if empty, plugin will migrate old PreferredMaps toggles into a "Default" group.
+        public List<PreferredMapGroup> PreferredMapGroups { get; set; } = new();
+
+        // Master list of user-selectable preferred map names (labels). Values are no longer used for logic
+        // once groups are enabled, but are kept for compatibility and to avoid breaking saved settings.
         public Dictionary<string, ToggleNode> PreferredMaps { get; set; } = new()
         {
+	        ["Corrupted Nexus - Corruption"] = new(false),
+            ["Cleansed - Sanctification"] = new(false),
             ["Blooming Field - Good"] = new(false),
             ["Savannah - Best"] = new(false),
             ["Fortress - Good"] = new(false),
@@ -145,7 +173,6 @@ namespace AtlasBiomeHighlighter
             ["Sealed Vault - Boss"] = new(false),
             ["Derelict Mansion - Boss"] = new(false),
         };
-
         public RangeNode<int> SpecialRingThickness { get; set; } = new(4, 1, 12);
         public RangeNode<float> SpecialAlphaMultiplier { get; set; } = new(0.85f, 0.1f, 1.0f);
         public ToggleNode ShowUniqueNameOnLabel { get; set; } = new(true);
