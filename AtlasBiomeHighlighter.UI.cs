@@ -25,6 +25,15 @@ namespace AtlasBiomeHighlighter
             { bool v = s.Enable.Value; if (ImGui.Checkbox("Enable", ref v)) s.Enable.Value = v; }
             { int v = s.AtlasRefreshMs.Value; if (ImGui.SliderInt("Atlas refresh (ms)", ref v, s.AtlasRefreshMs.Min, s.AtlasRefreshMs.Max)) s.AtlasRefreshMs.Value = v; }
             { int v = s.ScreenRefreshMs.Value; if (ImGui.SliderInt("Screen refresh (ms)", ref v, s.ScreenRefreshMs.Min, s.ScreenRefreshMs.Max)) s.ScreenRefreshMs.Value = v; }
+
+            if (ImGui.CollapsingHeader("Screen / Ultrawide", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+                ImGui.TextDisabled("Override viewport size used for on-screen detection and off-screen guide clamping. 0 = auto.");
+                { int v = s.BorderX.Value; if (ImGui.SliderInt("BorderX (width)", ref v, s.BorderX.Min, s.BorderX.Max)) s.BorderX.Value = v; }
+                { int v = s.BorderY.Value; if (ImGui.SliderInt("BorderY (height)", ref v, s.BorderY.Min, s.BorderY.Max)) s.BorderY.Value = v; }
+                ImGui.Unindent();
+            }
             { int v = s.NodeRadius.Value; if (ImGui.SliderInt("Node radius", ref v, s.NodeRadius.Min, s.NodeRadius.Max)) s.NodeRadius.Value = v; }
             { int v = s.RingThickness.Value; if (ImGui.SliderInt("Ring thickness", ref v, s.RingThickness.Min, s.RingThickness.Max)) s.RingThickness.Value = v; }
             { float v = s.Opacity.Value; if (ImGui.SliderFloat("Opacity", ref v, s.Opacity.Min, s.Opacity.Max)) s.Opacity.Value = v; }

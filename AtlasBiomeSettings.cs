@@ -29,6 +29,11 @@ namespace AtlasBiomeHighlighter
     {
         public ToggleNode Enable { get; set; } = new(false);
 
+        // Screen / viewport overrides (useful for ultrawide and windowed modes where overlay size differs).
+        // 0 = auto-detect from the overlay/game window.
+        public RangeNode<int> BorderX { get; set; } = new(0, 0, 10000);
+        public RangeNode<int> BorderY { get; set; } = new(0, 0, 10000);
+
         public RangeNode<int> AtlasRefreshMs { get; set; } = new(200, 50, 30000);
         public RangeNode<int> ScreenRefreshMs { get; set; } = new(200, 50, 5000);
         public RangeNode<int> NodeRadius { get; set; } = new(20, 4, 40);

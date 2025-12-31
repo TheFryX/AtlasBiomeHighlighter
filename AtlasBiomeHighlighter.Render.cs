@@ -13,6 +13,9 @@ namespace AtlasBiomeHighlighter
             if (!Settings.Enable.Value) return;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
 
+            // Ensure BorderX/BorderY reflect current window/overlay size even if settings changed.
+            UpdateViewportSize();
+
             // Keep preferred-map matching caches hot-path allocation-free.
             EnsurePreferredCacheUpToDate();
 

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using ExileCore2;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
+using ImGuiNET;
 
 namespace AtlasBiomeHighlighter
 {
@@ -16,8 +17,39 @@ namespace AtlasBiomeHighlighter
         private readonly Stopwatch _atlasRefreshSw = new();
         private readonly Stopwatch _screenRefreshSw = new();
 
-        private const int BorderX = 1920;
-        private const int BorderY = 1080;
+        // Viewport size used for on-screen checks and off-screen guide clamping.
+        // Auto-detected each refresh; user can override via settings (BorderX/BorderY).
+        private int _viewportWidth;
+        private int _viewportHeight;
+
+        private void UpdateViewportSize()
+        {
+            // Settings overrides take precedence.
+            int w = Settings.BorderX?.Value ?? 0;
+            int h = Settings.BorderY?.Value ?? 0;
+
+            if (w <= 0 || h <= 0)
+            {
+                // Dear ImGui IO size is the most reliable cross-mode measure available in ExileCore overlays.
+                // It matches the overlay draw-space and tracks windowed ultrawide correctly.
+                var ds = ImGui.GetIO().DisplaySize;
+                int autoW = (int)ds.X;
+                int autoH = (int)ds.Y;
+
+                if (w <= 0) w = autoW;
+                if (h <= 0) h = autoH;
+            }
+
+            // Sanity fallback to prevent division by zero / invalid rects.
+            if (w <= 0) w = 1920;
+            if (h <= 0) h = 1080;
+
+            _viewportWidth = w;
+            _viewportHeight = h;
+        }
+
+        private int BorderX => _viewportWidth > 0 ? _viewportWidth : 1920;
+        private int BorderY => _viewportHeight > 0 ? _viewportHeight : 1080;
 
         // ===== Preferred maps matching caches =====
         // Keep Render() hot-path allocation-free by caching enabled PreferredMaps tokens.
@@ -197,6 +229,9 @@ namespace AtlasBiomeHighlighter
         {
             _atlasPanel = GameController?.IngameState?.IngameUi?.WorldMap?.AtlasPanel;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
+
+            // Keep viewport dimensions up-to-date (ultrawide/windowed changes).
+            UpdateViewportSize();
 
             if (_atlasRefreshSw.ElapsedMilliseconds > Settings.AtlasRefreshMs.Value)
             {
