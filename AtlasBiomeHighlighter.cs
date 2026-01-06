@@ -85,6 +85,7 @@ namespace AtlasBiomeHighlighter
             _screenRefreshSw.Start();
             MigratePreferredGroupsIfNeeded();
             ResetAtlasCache();
+            RegisterRequestedHotkeys();
             return true;
         }
 
@@ -230,6 +231,10 @@ namespace AtlasBiomeHighlighter
             _atlasPanel = GameController?.IngameState?.IngameUi?.WorldMap?.AtlasPanel;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
 
+            // Hotkeys must be polled every frame; users can tap keys faster than ScreenRefreshMs.
+            // Keep the handler lightweight: it only does node picking when a key edge is detected.
+            HandleHotkeys();
+
             // Keep viewport dimensions up-to-date (ultrawide/windowed changes).
             UpdateViewportSize();
 
@@ -237,6 +242,10 @@ namespace AtlasBiomeHighlighter
             {
                 _atlasNodes = _atlasPanel.Descriptions?.ToArray() ?? Array.Empty<AtlasNodeDescription>();
                 _atlasRefreshSw.Restart();
+
+                // Rebuild graph caches (connections/waypoints/pathfinding) on atlas refresh.
+                RefreshGraphCaches();
+                SyncSelectedWaypoint();
             }
 
             if (_screenRefreshSw.ElapsedMilliseconds > Settings.ScreenRefreshMs.Value)
@@ -249,13 +258,12 @@ namespace AtlasBiomeHighlighter
                     _nodeTokenCache.Clear();
                 }
 
-                _visibleNodes.Clear();
-                foreach (var nd in _atlasNodes)
-                {
-                    if (nd?.Element is null) continue;
-                    if (Utility.IsInScreen(nd, BorderX, BorderY))
-                        _visibleNodes.Add(nd);
-                }
+                // Rebuild visibility & per-node caches at the throttled refresh interval.
+                // This moves expensive memory reads out of the Render() hot-path.
+                RebuildVisibleCaches();
+
+                // Hover-learned tooltip stats and path recomputation are safe to throttle.
+                RecomputeShortestPathIfNeeded();
                 _screenRefreshSw.Restart();
             }
         }

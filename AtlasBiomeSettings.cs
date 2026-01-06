@@ -1,11 +1,36 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Windows.Forms;
 using ExileCore2.Shared.Interfaces;
 using ExileCore2.Shared.Nodes;
 
 namespace AtlasBiomeHighlighter
 {
+    /// <summary>
+    /// Persisted user waypoint.
+    /// Stored as primitive fields to keep settings JSON stable.
+    /// </summary>
+    public sealed class AtlasWaypoint
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public float PositionX { get; set; }
+        public float PositionY { get; set; }
+        public int TowersCount { get; set; }
+
+        public int ColorArgb { get; set; } = Color.FromArgb(255, 255, 255, 255).ToArgb();
+        public bool Selected { get; set; }
+        public bool Enabled { get; set; } = true;
+        /// <summary>
+        /// Whether the waypoint's on-atlas label should be drawn when the main overlay is not
+        /// already drawing the map-name label for that node.
+        /// </summary>
+        public bool ShowLabel { get; set; } = true;
+        public string Name { get; set; } = string.Empty;
+    }
+
+    
     /// <summary>
     /// A user-defined group of preferred maps. Enabled groups are unioned for matching/highlighting.
     /// Persisted in settings JSON.
@@ -195,6 +220,46 @@ namespace AtlasBiomeHighlighter
         public ToggleNode LabelOutline { get; set; } = new(true);
         public RangeNode<int> LabelOutlineThickness { get; set; } = new(2, 1, 6);
         public ToggleNode LabelBold { get; set; } = new(true);
+
+        // ===== Requested features =====
+        // Map name labels (independent from biome/special labels).
+        public ToggleNode ShowMapNames { get; set; } = new(true);
+        public RangeNode<int> MapNameOffsetY { get; set; } = new(34, -10, 120);
+        // Map connections overlay.
+        public ToggleNode DrawMapConnections { get; set; } = new(true);
+        public ToggleNode DrawVisitedConnections { get; set; } = new(true);
+        public ColorNode ConnectionColor { get; set; } = new(Color.FromArgb(230, 230, 230));
+        public ColorNode ConnectionColorLocked { get; set; } = new(Color.FromArgb(120, 120, 120));
+        public RangeNode<int> ConnectionThickness { get; set; } = new(1, 1, 6);
+
+        // Waypoints.
+        public ToggleNode WaypointsEnabled { get; set; } = new(true);
+        public ToggleNode ShowWaypointsOnAtlas { get; set; } = new(true);
+        public ToggleNode ShowWaypointArrowsOnAtlas { get; set; } = new(true);
+        public List<AtlasWaypoint> Waypoints { get; set; } = new();
+        public ColorNode DefaultWaypointColor { get; set; } = new(Color.FromArgb(255, 80, 80));
+        public RangeNode<int> WaypointRingRadius { get; set; } = new(32, 8, 64);
+        public RangeNode<int> WaypointRingThickness { get; set; } = new(3, 1, 12);
+        public RangeNode<int> WaypointAtlasMaxItems { get; set; } = new(30, 5, 250);
+        public ToggleNode WaypointAtlasUnlockedOnly { get; set; } = new(false);
+
+        // Shortest path.
+        // Optional: draw a full shortest-path polyline to the selected waypoint.
+        // Users requested that adding a waypoint should NOT automatically draw "roads" to it.
+        public ToggleNode DrawShortestPath { get; set; } = new(false);
+        public ColorNode ShortestPathColor { get; set; } = new(Color.FromArgb(255, 140, 0));
+        public RangeNode<int> ShortestPathThickness { get; set; } = new(3, 1, 10);
+
+        // Tower range.
+        public ToggleNode DrawTowerRange { get; set; } = new(true);
+        public RangeNode<int> TowerRange { get; set; } = new(11, 1, 30);
+        public ColorNode TowerRangeColor { get; set; } = new(Color.FromArgb(255, 255, 255));
+
+        // Hotkeys.
+        public HotkeyNode AddWaypointHotkey { get; set; } = new(Keys.Insert);
+        public HotkeyNode DeleteWaypointHotkey { get; set; } = new(Keys.Delete);
+        public HotkeyNode ToggleWaypointPanelHotkey { get; set; } = new(Keys.End);
+        public HotkeyNode ShowTowerRangeHotkey { get; set; } = new(Keys.PageUp);
 
         public Dictionary<Biome, ToggleNode> Visible { get; } = new()
         {

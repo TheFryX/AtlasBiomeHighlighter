@@ -108,6 +108,17 @@ namespace AtlasBiomeHighlighter
             };
 
 
+        private static readonly System.Collections.Generic.Dictionary<string, string> TowerNamesById =
+            new(System.StringComparer.OrdinalIgnoreCase)
+            {
+                ["MapSwampTower"] = "Swamp Tower",
+                ["MapLostTowers"] = "Lost Towers",
+                ["MapMesa"] = "Mesa",
+                ["MapBluff"] = "Bluff",
+                ["MapAlpineRidge"] = "Alpine Ridge",
+            };
+
+
         public static Biome TryGetBiome(AtlasNodeDescription nd)
         {
             // Prefer direct .Biome if available
@@ -269,6 +280,18 @@ namespace AtlasBiomeHighlighter
                 name = unm;
                 return true;
             }
+
+            // 1.25) Tower Id mapping (Mesa/Bluff/etc.)
+            try
+            {
+                var id = ExtractString(GetMember(nd.Element, "Id")) ?? ExtractString(GetMember(GetMember(nd.Element, "Area"), "Id"));
+                if (!string.IsNullOrWhiteSpace(id) && TowerNamesById.TryGetValue(id.Trim(), out var tname))
+                {
+                    name = tname;
+                    return true;
+                }
+            }
+            catch { }
 
             // 1.5) Area.Name for normal maps
             try

@@ -61,60 +61,223 @@ namespace AtlasBiomeHighlighter
 
             if (ImGui.CollapsingHeader("Special highlights (strict)", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                { bool v = s.HighlightDeadlyBoss.Value; if (ImGui.Checkbox("Highlight Deadly Map Boss", ref v)) s.HighlightDeadlyBoss.Value = v; }
-                { bool v = s.HighlightAbyssOverrun.Value; if (ImGui.Checkbox("Highlight Abyss Overrun", ref v)) s.HighlightAbyssOverrun.Value = v; }
-                { bool v = s.HighlightMomentofZen.Value; if (ImGui.Checkbox("Highlight Moment of Zen", ref v)) s.HighlightMomentofZen.Value = v; }
-                { bool v = s.HighlightCorruptedNexus.Value; if (ImGui.Checkbox("Highlight Corrupted Nexus", ref v)) s.HighlightCorruptedNexus.Value = v; }
-                { bool v = s.HighlightCleansed.Value; if (ImGui.Checkbox("Highlight Cleansed", ref v)) s.HighlightCleansed.Value = v; }
-                { bool v = s.HighlightUniqueMaps.Value; if (ImGui.Checkbox("Highlight Unique maps", ref v)) s.HighlightUniqueMaps.Value = v; }
+                {
+    bool v = s.HighlightDeadlyBoss.Value;
+    if (ImGui.Checkbox("Highlight Deadly Map Boss", ref v))
+        s.HighlightDeadlyBoss.Value = v;
+    ImGui.SameLine();
+    if (DrawColorSquare("DeadlyBoss", s.DeadlyBossRingColor.Value, out var c))
+        s.DeadlyBossRingColor.Value = c;
+}
+                {
+    bool v = s.HighlightAbyssOverrun.Value;
+    if (ImGui.Checkbox("Highlight Abyss Overrun", ref v))
+        s.HighlightAbyssOverrun.Value = v;
+    ImGui.SameLine();
+    if (DrawColorSquare("AbyssOverrun", s.AbyssOverrunRingColor.Value, out var c))
+        s.AbyssOverrunRingColor.Value = c;
+}
+                {
+    bool v = s.HighlightMomentofZen.Value;
+    if (ImGui.Checkbox("Highlight Moment of Zen", ref v))
+        s.HighlightMomentofZen.Value = v;
+    ImGui.SameLine();
+    if (DrawColorSquare("MomentofZen", s.MomentofZenRingColor.Value, out var c))
+        s.MomentofZenRingColor.Value = c;
+}
+                {
+    bool v = s.HighlightCorruptedNexus.Value;
+    if (ImGui.Checkbox("Highlight Corrupted Nexus", ref v))
+        s.HighlightCorruptedNexus.Value = v;
+    ImGui.SameLine();
+    if (DrawColorSquare("CorruptedNexus", s.CorruptedNexusRingColor.Value, out var c))
+        s.CorruptedNexusRingColor.Value = c;
+}
+                {
+    bool v = s.HighlightCleansed.Value;
+    if (ImGui.Checkbox("Highlight Cleansed", ref v))
+        s.HighlightCleansed.Value = v;
+    ImGui.SameLine();
+    if (DrawColorSquare("Cleansed", s.CleansedRingColor.Value, out var c))
+        s.CleansedRingColor.Value = c;
+}
+                {
+    bool v = s.HighlightUniqueMaps.Value;
+    if (ImGui.Checkbox("Highlight Unique maps", ref v))
+        s.HighlightUniqueMaps.Value = v;
+    ImGui.SameLine();
+    if (DrawColorSquare("UniqueMap", s.UniqueMapRingColor.Value, out var c))
+        s.UniqueMapRingColor.Value = c;
+}
 
                 { int v = s.SpecialRingThickness.Value; if (ImGui.SliderInt("Special ring thickness", ref v, s.SpecialRingThickness.Min, s.SpecialRingThickness.Max)) s.SpecialRingThickness.Value = v; }
                 { float v = s.SpecialAlphaMultiplier.Value; if (ImGui.SliderFloat("Special alpha multiplier", ref v, s.SpecialAlphaMultiplier.Min, s.SpecialAlphaMultiplier.Max)) s.SpecialAlphaMultiplier.Value = v; }
-
-                Vector4 vec;
-                vec = new Vector4(s.DeadlyBossRingColor.Value.R/255f, s.DeadlyBossRingColor.Value.G/255f, s.DeadlyBossRingColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Deadly boss ring", ref vec)) s.DeadlyBossRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
-                vec = new Vector4(s.AbyssOverrunRingColor.Value.R/255f, s.AbyssOverrunRingColor.Value.G/255f, s.AbyssOverrunRingColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Abyss Overrun ring", ref vec)) s.AbyssOverrunRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
-                vec = new Vector4(s.MomentofZenRingColor.Value.R/255f, s.MomentofZenRingColor.Value.G/255f, s.MomentofZenRingColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Moment of Zen ring", ref vec)) s.MomentofZenRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
-                vec = new Vector4(s.CorruptedNexusRingColor.Value.R/255f, s.CorruptedNexusRingColor.Value.G/255f, s.CorruptedNexusRingColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Corrupted Nexus ring", ref vec)) s.CorruptedNexusRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
-                vec = new Vector4(s.CleansedRingColor.Value.R/255f, s.CleansedRingColor.Value.G/255f, s.CleansedRingColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Cleansed ring", ref vec)) s.CleansedRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
-                vec = new Vector4(s.UniqueMapRingColor.Value.R/255f, s.UniqueMapRingColor.Value.G/255f, s.UniqueMapRingColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Unique map ring", ref vec)) s.UniqueMapRingColor.Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
 
                 { bool v = s.ShowUniqueNameOnLabel.Value; if (ImGui.Checkbox("Show Unique map name instead of biome", ref v)) s.ShowUniqueNameOnLabel.Value = v; }
                 { bool v = s.PreferMapNameForDeadly.Value; if (ImGui.Checkbox("Prefer map name on Deadly", ref v)) s.PreferMapNameForDeadly.Value = v; }
                 { bool v = s.ShowSpecialTag.Value; if (ImGui.Checkbox("Show special tag on label", ref v)) s.ShowSpecialTag.Value = v; }
             }
 
+
+	                static bool DrawColorSquare(string id, System.Drawing.Color color, out System.Drawing.Color newColor)
+                {
+                    float size = ImGui.GetFrameHeight();
+                    if (size < 18f) size = 18f;
+
+                    ImGui.PushID(id);
+                    ImGui.SetNextItemWidth(size);
+
+                    var vec = new Vector4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f);
+                    bool changed = ImGui.ColorEdit4("##c", ref vec, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel);
+                    if (changed)
+                    {
+                        int r = (int)(vec.X * 255f);
+                        int g = (int)(vec.Y * 255f);
+                        int b = (int)(vec.Z * 255f);
+                        int a = (int)(vec.W * 255f);
+                        if (r < 0) r = 0; else if (r > 255) r = 255;
+                        if (g < 0) g = 0; else if (g > 255) g = 255;
+                        if (b < 0) b = 0; else if (b > 255) b = 255;
+                        if (a < 0) a = 0; else if (a > 255) a = 255;
+                        newColor = System.Drawing.Color.FromArgb(a, r, g, b);
+                    }
+                    else
+                    {
+                        newColor = color;
+                    }
+
+                    ImGui.PopID();
+                    return changed;
+                }
+
             if (ImGui.CollapsingHeader("Label settings", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 { int v = s.LabelOffset.Value; if (ImGui.SliderInt("Label vertical offset", ref v, s.LabelOffset.Min, s.LabelOffset.Max)) s.LabelOffset.Value = v; }
                 { bool v = s.LabelUseBiomeColor.Value; if (ImGui.Checkbox("Use biome color for text", ref v)) s.LabelUseBiomeColor.Value = v; }
                 var vecText = new Vector4(s.LabelTextColor.Value.R/255f, s.LabelTextColor.Value.G/255f, s.LabelTextColor.Value.B/255f, 1f);
-                if (ImGui.ColorEdit4("Label text color", ref vecText)) s.LabelTextColor.Value = System.Drawing.Color.FromArgb((int)(vecText.X*255),(int)(vecText.Y*255),(int)(vecText.Z*255));
+				if (ImGui.ColorEdit4("Label text color", ref vecText, ImGuiColorEditFlags.NoInputs)) s.LabelTextColor.Value = System.Drawing.Color.FromArgb((int)(vecText.X*255),(int)(vecText.Y*255),(int)(vecText.Z*255));
                 { bool v = s.LabelOutline.Value; if (ImGui.Checkbox("Label outline", ref v)) s.LabelOutline.Value = v; }
                 { int v = s.LabelOutlineThickness.Value; if (ImGui.SliderInt("Outline thickness", ref v, s.LabelOutlineThickness.Min, s.LabelOutlineThickness.Max)) s.LabelOutlineThickness.Value = v; }
                 { bool v = s.LabelBold.Value; if (ImGui.Checkbox("Label bold (thicker)", ref v)) s.LabelBold.Value = v; }
             }
 
+            if (ImGui.CollapsingHeader("QoL Features", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+
+                bool showNames = s.ShowMapNames.Value;
+                if (ImGui.Checkbox("Show map names", ref showNames)) s.ShowMapNames.Value = showNames;
+                int my = s.MapNameOffsetY.Value;
+                if (ImGui.SliderInt("Map name Y offset", ref my, s.MapNameOffsetY.Min, s.MapNameOffsetY.Max)) s.MapNameOffsetY.Value = my;
+                ImGui.Separator();
+                bool con = s.DrawMapConnections.Value;
+                if (ImGui.Checkbox("Draw map connections", ref con)) s.DrawMapConnections.Value = con;
+                bool hideVisited = !s.DrawVisitedConnections.Value;
+                if (ImGui.Checkbox("Hide connections involving visited nodes", ref hideVisited)) s.DrawVisitedConnections.Value = !hideVisited;
+                int ct = s.ConnectionThickness.Value;
+                if (ImGui.SliderInt("Connection thickness", ref ct, s.ConnectionThickness.Min, s.ConnectionThickness.Max)) s.ConnectionThickness.Value = ct;
+                var cc = new Vector4(s.ConnectionColor.Value.R / 255f, s.ConnectionColor.Value.G / 255f, s.ConnectionColor.Value.B / 255f, 1f);
+				if (ImGui.ColorEdit4("Connection color (unlocked)", ref cc, ImGuiColorEditFlags.NoInputs))
+                    s.ConnectionColor.Value = System.Drawing.Color.FromArgb((int)(cc.X * 255), (int)(cc.Y * 255), (int)(cc.Z * 255));
+                var ccl = new Vector4(s.ConnectionColorLocked.Value.R / 255f, s.ConnectionColorLocked.Value.G / 255f, s.ConnectionColorLocked.Value.B / 255f, 1f);
+				if (ImGui.ColorEdit4("Connection color (locked)", ref ccl, ImGuiColorEditFlags.NoInputs))
+                    s.ConnectionColorLocked.Value = System.Drawing.Color.FromArgb((int)(ccl.X * 255), (int)(ccl.Y * 255), (int)(ccl.Z * 255));
+
+                ImGui.Separator();
+
+                bool wp = s.WaypointsEnabled.Value;
+                if (ImGui.Checkbox("Waypoints enabled", ref wp)) s.WaypointsEnabled.Value = wp;
+                int wr = s.WaypointRingRadius.Value;
+                if (ImGui.SliderInt("Waypoint ring radius", ref wr, s.WaypointRingRadius.Min, s.WaypointRingRadius.Max)) s.WaypointRingRadius.Value = wr;
+                int wt = s.WaypointRingThickness.Value;
+                if (ImGui.SliderInt("Waypoint ring thickness", ref wt, s.WaypointRingThickness.Min, s.WaypointRingThickness.Max)) s.WaypointRingThickness.Value = wt;
+                var dwc = new Vector4(s.DefaultWaypointColor.Value.R / 255f, s.DefaultWaypointColor.Value.G / 255f, s.DefaultWaypointColor.Value.B / 255f, 1f);
+				if (ImGui.ColorEdit4("Default waypoint color", ref dwc, ImGuiColorEditFlags.NoInputs))
+                    s.DefaultWaypointColor.Value = System.Drawing.Color.FromArgb((int)(dwc.X * 255), (int)(dwc.Y * 255), (int)(dwc.Z * 255));
+
+                ImGui.Separator();
+
+                bool sp = s.DrawShortestPath.Value;
+                if (ImGui.Checkbox("Draw shortest path to selected waypoint", ref sp)) s.DrawShortestPath.Value = sp;
+                int st = s.ShortestPathThickness.Value;
+                if (ImGui.SliderInt("Shortest path thickness", ref st, s.ShortestPathThickness.Min, s.ShortestPathThickness.Max)) s.ShortestPathThickness.Value = st;
+                var spc = new Vector4(s.ShortestPathColor.Value.R / 255f, s.ShortestPathColor.Value.G / 255f, s.ShortestPathColor.Value.B / 255f, 1f);
+				if (ImGui.ColorEdit4("Shortest path color", ref spc, ImGuiColorEditFlags.NoInputs))
+                    s.ShortestPathColor.Value = System.Drawing.Color.FromArgb((int)(spc.X * 255), (int)(spc.Y * 255), (int)(spc.Z * 255));
+
+                ImGui.Separator();
+
+                bool tr = s.DrawTowerRange.Value;
+                if (ImGui.Checkbox("Tower range (toggle hotkey)", ref tr)) s.DrawTowerRange.Value = tr;
+                int r = s.TowerRange.Value;
+                if (ImGui.SliderInt("Tower range (coord)", ref r, s.TowerRange.Min, s.TowerRange.Max)) s.TowerRange.Value = r;
+                var trc = new Vector4(s.TowerRangeColor.Value.R / 255f, s.TowerRangeColor.Value.G / 255f, s.TowerRangeColor.Value.B / 255f, 1f);
+				if (ImGui.ColorEdit4("Tower range color", ref trc, ImGuiColorEditFlags.NoInputs))
+                    s.TowerRangeColor.Value = System.Drawing.Color.FromArgb((int)(trc.X * 255), (int)(trc.Y * 255), (int)(trc.Z * 255));
+
+                ImGui.TextDisabled("Hotkeys: Insert add waypoint, Delete remove, End waypoint window, PageUp tower range toggle");
+
+                ImGui.Unindent();
+            }
+
             if (ImGui.CollapsingHeader("Biomes", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                foreach (var kvp in s.Visible.ToArray())
+                // Compact one-row-per-biome layout: checkbox + name + color square right next to it.
+                // The table is used only to get alternating row backgrounds / separators for readability.
+                if (ImGui.BeginTable(
+                        "##biomes_table",
+                        1,
+                        ImGuiTableFlags.RowBg |
+                        ImGuiTableFlags.BordersInnerH |
+                        ImGuiTableFlags.SizingStretchSame))
                 {
-                    var biome = kvp.Key;
-                    bool vis = kvp.Value.Value;
-                    if (ImGui.Checkbox(biome.ToString(), ref vis)) kvp.Value.Value = vis;
+                    ImGui.TableSetupColumn("Biome", ImGuiTableColumnFlags.WidthStretch);
 
-                    var vec = new Vector4(s.Colors[biome].Value.R/255f, s.Colors[biome].Value.G/255f, s.Colors[biome].Value.B/255f, 1f);
-                    if (ImGui.ColorEdit4("color##" + biome, ref vec))
+                    foreach (var kvp in s.Visible.ToArray())
                     {
-                        s.Colors[biome].Value = System.Drawing.Color.FromArgb((int)(vec.X*255),(int)(vec.Y*255),(int)(vec.Z*255));
+                        var biome = kvp.Key;
+
+                        ImGui.PushID((int)biome);
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0);
+
+                        bool vis = kvp.Value.Value;
+                        if (ImGui.Checkbox("##enabled", ref vis))
+                            kvp.Value.Value = vis;
+
+                        ImGui.SameLine(0, 8);
+                        ImGui.AlignTextToFramePadding();
+                        ImGui.TextUnformatted(biome.ToString());
+
+                        // Color square (no RGBA inputs) right next to the biome name.
+                        ImGui.SameLine(0, 10);
+                        // MathF may be unavailable depending on the plugin host target framework.
+                        // Keep this simple, allocation-free, and framework-agnostic.
+                        float colorWidth = ImGui.GetFrameHeight() * 1.25f;
+                        if (colorWidth < 22f) colorWidth = 22f;
+                        ImGui.PushItemWidth(colorWidth);
+
+                        var c = s.Colors[biome].Value;
+                        var vec = new Vector4(c.R / 255f, c.G / 255f, c.B / 255f, 1f);
+                        if (ImGui.ColorEdit4(
+                                "##color",
+                                ref vec,
+                                ImGuiColorEditFlags.NoInputs |
+                                ImGuiColorEditFlags.NoAlpha))
+                        {
+                            s.Colors[biome].Value = System.Drawing.Color.FromArgb(
+                                (int)(vec.X * 255f),
+                                (int)(vec.Y * 255f),
+                                (int)(vec.Z * 255f));
+                        }
+
+                        ImGui.PopItemWidth();
+                        ImGui.PopID();
                     }
+
+                    ImGui.EndTable();
                 }
+
                 ImGui.Separator();
                 ImGui.TextDisabled("Alpha jest sterowana globalnie przez \"Opacity\".");
             }
@@ -147,7 +310,7 @@ namespace AtlasBiomeHighlighter
                     s.PreferredMapRingColor.Value.G / 255f,
                     s.PreferredMapRingColor.Value.B / 255f,
                     1f);
-                if (ImGui.ColorEdit4("Preferred ring", ref pref))
+				if (ImGui.ColorEdit4("Preferred ring", ref pref, ImGuiColorEditFlags.NoInputs))
                     s.PreferredMapRingColor.Value = System.Drawing.Color.FromArgb(
                         (int)(pref.X * 255),
                         (int)(pref.Y * 255),
