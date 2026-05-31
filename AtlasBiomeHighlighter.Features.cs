@@ -93,15 +93,26 @@ namespace AtlasBiomeHighlighter
 
                 foreach (var p in points)
                 {
-                    var src = p.Item1;
+                    var src = p.Source;
                     var srcKey = (src.X, src.Y);
                     if (!_neighborsByCoord.TryGetValue(srcKey, out var list))
                         _neighborsByCoord[srcKey] = list = new List<(int, int)>(6);
 
-                    AddNeighbor(list, p.Item2);
-                    AddNeighbor(list, p.Item3);
-                    AddNeighbor(list, p.Item4);
-                    AddNeighbor(list, p.Item5);
+                    foreach (var target in p.Targets)
+                    {
+                        if (target == default)
+                            continue;
+
+                        AddNeighbor(list, target);
+
+                        // Keep the graph usable for shortest-path routing even if the API exposes
+                        // only one direction for a connection. RenderMapConnections already avoids
+                        // drawing duplicates.
+                        var targetKey = (target.X, target.Y);
+                        if (!_neighborsByCoord.TryGetValue(targetKey, out var reverseList))
+                            _neighborsByCoord[targetKey] = reverseList = new List<(int, int)>(6);
+                        AddNeighbor(reverseList, src);
+                    }
                 }
             }
             catch

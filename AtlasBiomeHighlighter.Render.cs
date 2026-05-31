@@ -288,21 +288,10 @@ namespace AtlasBiomeHighlighter
                             (int)(textColor.B * 0.55f));
                     }
 
-                    if (Settings.LabelOutline.Value)
-                    {
-                        int t = Settings.LabelOutlineThickness.Value;
-                        for (int dx = -t; dx <= t; dx++)
-                        for (int dy = -t; dy <= t; dy++)
-                        {
-                            if (dx == 0 && dy == 0) continue;
-                            Graphics.DrawText(text, new Vector2(pos.X + dx, pos.Y + dy), System.Drawing.Color.Black);
-                        }
-                    }
-
-                    if (Settings.LabelBold.Value)
-                        Graphics.DrawText(text, new Vector2(pos.X + 1, pos.Y), textColor);
-
-                    Graphics.DrawText(text, pos, textColor);
+                    // Draw through the shared helper so long labels such as Preferred-map tags
+                    // are pixel-snapped before fake-bold is applied. This avoids the doubled/garbled
+                    // look caused by rendering the same long text at fractional X positions.
+                    DrawTextWithLabelSettings(text, pos, textColor);
                 }
             }
 
@@ -494,8 +483,17 @@ namespace AtlasBiomeHighlighter
             DrawTextWithLabelSettings(text, pos, textColor);
         }
 
+        private static Vector2 SnapTextPos(Vector2 pos)
+        {
+            return new Vector2((float)Math.Round(pos.X), (float)Math.Round(pos.Y));
+        }
+
         private void DrawTextWithLabelSettings(string text, Vector2 pos, Color textColor)
         {
+            // Graphics.DrawText does not like fake-bold on long fractional-position strings.
+            // Snapping keeps labels stable when Preferred tags make the text much wider.
+            pos = SnapTextPos(pos);
+
             if (Settings.LabelOutline.Value)
             {
                 int t = Settings.LabelOutlineThickness.Value;
@@ -508,7 +506,11 @@ namespace AtlasBiomeHighlighter
             }
 
             if (Settings.LabelBold.Value)
-                Graphics.DrawText(text, new Vector2(pos.X + 1, pos.Y), textColor);
+            {
+                // Vertical fake-bold is less destructive for ExileCore's atlas font than drawing
+                // the same long text at X+1, which can split thin glyphs apart.
+                Graphics.DrawText(text, new Vector2(pos.X, pos.Y + 1), textColor);
+            }
 
             Graphics.DrawText(text, pos, textColor);
         }
