@@ -39,14 +39,10 @@ namespace AtlasBiomeHighlighter
                         if (!TryGetCachedNodeTokens(nd, out var nameToken, out _)) continue;
                         if (nameToken.Length == 0) continue;
 
+                        // Preferred map matching must be exact.
+                        // Short new map names like "Reservoir", "Pit", "Port" must not match
+                        // longer maps such as "Sacred Reservoir".
                         bool match = _preferredTokensExact.Contains(nameToken);
-                        if (!match)
-                        {
-                            for (int i = 0; i < _preferredTokensList.Length; i++)
-                            {
-                                if (Utility.TokenContainsEitherWay(nameToken, _preferredTokensList[i])) { match = true; break; }
-                            }
-                        }
                         if (!match) continue;
 
                     if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(nd)) continue;
@@ -129,14 +125,13 @@ namespace AtlasBiomeHighlighter
                 var biome = info.Biome;
 
                 // Specials bypass biome filter.
-                bool biomeVisible = Settings.Visible.TryGetValue(biome, out var on) && on.Value;
+                bool biomeVisible = biome != Biome.Unknown && Settings.Visible.TryGetValue(biome, out var on) && on.Value;
                 var sflags = info.SpecialFlags;
                 bool isDeadly = (sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
 
                 bool specialWanted =
                     ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
                     ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
-                    ((sflags & Utility.SpecialFlags.AbyssOverrun) != 0 && Settings.HighlightAbyssOverrun.Value) ||
                     ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
                     ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value) ||
                     ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value);
@@ -146,34 +141,22 @@ namespace AtlasBiomeHighlighter
                 string? preferredMatchedToken = null;
                 if (Settings.HighlightPreferredMaps.Value && !isDeadly && TryGetCachedNodeTokens(nd, out var nameToken2, out var idToken2))
                 {
+                    // Exact-only matching prevents short map names from matching longer ones.
+                    // Example: "Reservoir" must not match "Sacred Reservoir".
                     if (nameToken2.Length != 0 && _preferredTokensExact.Contains(nameToken2))
                     {
                         preferredWanted = true;
                         preferredMatchedToken = nameToken2;
                     }
-                    else
+                    else if (idToken2.Length != 0 && _preferredTokensExact.Contains(idToken2))
                     {
-                        for (int i = 0; i < _preferredTokensList.Length; i++)
-                        {
-                            var keyToken = _preferredTokensList[i];
-                            if (keyToken.Length == 0) continue;
-
-                            if (nameToken2.Length != 0 && Utility.TokenContainsEitherWay(nameToken2, keyToken))
-                            {
-                                preferredWanted = true;
-                                preferredMatchedToken = keyToken;
-                                break;
-                            }
-
-                            if (!preferredWanted && idToken2.Length != 0 && idToken2.Contains(keyToken, StringComparison.Ordinal))
-                            {
-                                preferredWanted = true;
-                                preferredMatchedToken = keyToken;
-                                break;
-                            }
-                        }
+                        preferredWanted = true;
+                        preferredMatchedToken = idToken2;
                     }
                 }
+
+                if (preferredWanted)
+                    DebugPreferredMapHit(nd, preferredMatchedToken ?? string.Empty, preferredMatchedToken == null ? null : GetPreferredTag(preferredMatchedToken), info.MapName, biome, sflags);
 
                 if (!biomeVisible && !(specialWanted || preferredWanted))
                     continue;
@@ -204,11 +187,6 @@ namespace AtlasBiomeHighlighter
                 if ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value)
                 {
                     var c = Utility.WithOpacity(Settings.DeadlyBossRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
-                    Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
-                }
-                if ((sflags & Utility.SpecialFlags.AbyssOverrun) != 0 && Settings.HighlightAbyssOverrun.Value)
-                {
-                    var c = Utility.WithOpacity(Settings.AbyssOverrunRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
                 }
                 if ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value)
@@ -245,7 +223,11 @@ namespace AtlasBiomeHighlighter
                     }
                     else
                     {
-                        if (Settings.ShowMapNames.Value && !string.IsNullOrWhiteSpace(info.MapName))
+                        // Do not show normal map-name labels for Unknown biome nodes.
+                        // After the atlas update some nodes expose incomplete/stale Area.Name data while
+                        // their biome is still unresolved, which can place unrelated map names on the atlas.
+                        // Special cases above (Deadly/Unique) may still use their explicit map/unique name.
+                        if (Settings.ShowMapNames.Value && biome != Biome.Unknown && !string.IsNullOrWhiteSpace(info.MapName))
                         {
                             // UX: when map names are enabled, show "MapName - Biome" to keep biome context.
                             text = string.IsNullOrWhiteSpace(info.BiomeDisplay) ? info.MapName! : (info.MapName! + " - " + info.BiomeDisplay);
@@ -257,13 +239,13 @@ namespace AtlasBiomeHighlighter
                     }
 
                     // If a special/unique-name path selected the label text, keep biome context when map names are enabled.
-                    if (Settings.ShowMapNames.Value && text.IndexOf(" - ", StringComparison.Ordinal) < 0 && !string.IsNullOrWhiteSpace(info.BiomeDisplay))
+                    // For normal Unknown nodes keep the label as just "Unknown" to avoid stale/wrong map names.
+                    if (Settings.ShowMapNames.Value && biome != Biome.Unknown && text.IndexOf(" - ", StringComparison.Ordinal) < 0 && !string.IsNullOrWhiteSpace(info.BiomeDisplay))
                         text = text + " - " + info.BiomeDisplay;
 
                     if (Settings.ShowSpecialTag.Value)
                     {
                         if ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0) text += " [Deadly]";
-                        if ((sflags & Utility.SpecialFlags.AbyssOverrun) != 0) text += " [Abyss]";
                         if ((sflags & Utility.SpecialFlags.MomentofZen) != 0) text += " [Moment Of Zen]";
                         if ((sflags & Utility.SpecialFlags.Cleansed) != 0) text += " [Cleansed]";
                         if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
@@ -564,13 +546,12 @@ namespace AtlasBiomeHighlighter
             var biome = Utility.TryGetBiome(nd);
 
             // Specials bypass biome filter
-            bool biomeVisible = Settings.Visible.TryGetValue(biome, out var on) && on.Value;
+            bool biomeVisible = biome != Biome.Unknown && Settings.Visible.TryGetValue(biome, out var on) && on.Value;
             var sflags = Utility.TryGetSpecialFlags(nd);
             bool isDeadly = (sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
             bool specialWanted =
                 ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
                 ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
-                ((sflags & Utility.SpecialFlags.AbyssOverrun) != 0 && Settings.HighlightAbyssOverrun.Value) ||
                 ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
                 ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value) ||
                 ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value);
@@ -578,28 +559,10 @@ namespace AtlasBiomeHighlighter
             bool preferredWanted = false;
             if (Settings.HighlightPreferredMaps.Value && !isDeadly && TryGetCachedNodeTokens(nd, out var nameToken, out var idToken))
             {
-                if (nameToken.Length != 0 && _preferredTokensExact.Contains(nameToken))
-                {
-                    preferredWanted = true;
-                }
-                else
-                {
-                    for (int i = 0; i < _preferredTokensList.Length; i++)
-                    {
-                        var keyToken = _preferredTokensList[i];
-                        if (keyToken.Length == 0) continue;
-                        if (nameToken.Length != 0 && Utility.TokenContainsEitherWay(nameToken, keyToken))
-                        {
-                            preferredWanted = true;
-                            break;
-                        }
-                        if (!preferredWanted && idToken.Length != 0 && idToken.Contains(keyToken, System.StringComparison.Ordinal))
-                        {
-                            preferredWanted = true;
-                            break;
-                        }
-                    }
-                }
+                // Exact-only matching prevents short map names from matching longer ones.
+                preferredWanted =
+                    (nameToken.Length != 0 && _preferredTokensExact.Contains(nameToken)) ||
+                    (idToken.Length != 0 && _preferredTokensExact.Contains(idToken));
             }
 
             if (!biomeVisible && !(specialWanted || preferredWanted))

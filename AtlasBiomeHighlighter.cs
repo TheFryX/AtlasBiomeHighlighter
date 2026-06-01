@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.IO;
+using System.Text;
+using System.Reflection;
 using ExileCore2;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
 using ImGuiNET;
@@ -13,6 +16,7 @@ namespace AtlasBiomeHighlighter
         private ExileCore2.PoEMemory.Elements.AtlasElements.AtlasPanel? _atlasPanel;
         private AtlasNodeDescription[] _atlasNodes = Array.Empty<AtlasNodeDescription>();
         private readonly System.Collections.Generic.List<AtlasNodeDescription> _visibleNodes = new();
+        private readonly HashSet<string> _preferredDebugLogged = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly Stopwatch _atlasRefreshSw = new();
         private readonly Stopwatch _screenRefreshSw = new();
@@ -77,6 +81,153 @@ namespace AtlasBiomeHighlighter
             public string NameToken { get; }
             public string IdToken { get; }
             public int LastSeenFrame { get; }
+        }
+
+
+        private void DebugPreferredMapHit(AtlasNodeDescription nd, string matchedToken, string? preferredTag, string? cachedMapName, Biome biome, Utility.SpecialFlags flags)
+        {
+            if (!Settings.DebugPreferredMaps.Value)
+                return;
+
+            try
+            {
+                string mapName = cachedMapName ?? string.Empty;
+                Utility.TryGetAnyMapName(nd, out var anyMapName);
+                string areaId = SafeMemberPath(nd.Element, "Area.Id");
+                string areaName = SafeMemberPath(nd.Element, "Area.Name");
+                string elementId = SafeMemberPath(nd.Element, "Id");
+                string biomeRaw = SafeMemberPath(nd.Element, "Biome");
+                string coord = $"{nd.Coordinate.X},{nd.Coordinate.Y}";
+                string key = $"{matchedToken}|{coord}|{areaId}|{areaName}|{elementId}";
+                if (!_preferredDebugLogged.Add(key))
+                    return;
+
+                var sb = new StringBuilder(4096);
+                sb.AppendLine("============================================================");
+                sb.AppendLine($"Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+                sb.AppendLine($"PreferredToken: {matchedToken}");
+                sb.AppendLine($"PreferredTag: {preferredTag ?? string.Empty}");
+                sb.AppendLine($"CachedMapName: {mapName}");
+                sb.AppendLine($"TryGetAnyMapName: {anyMapName ?? string.Empty}");
+                sb.AppendLine($"Coordinate: {coord}");
+                sb.AppendLine($"BiomeParsed: {biome}");
+                sb.AppendLine($"SpecialFlags: {flags}");
+                sb.AppendLine($"ElementType: {nd.Element?.GetType().FullName ?? "null"}");
+                sb.AppendLine($"Element.Id: {elementId}");
+                sb.AppendLine($"Element.Biome: {biomeRaw}");
+                sb.AppendLine($"Area.Id: {areaId}");
+                sb.AppendLine($"Area.Name: {areaName}");
+                sb.AppendLine($"Text: {SafeMemberPath(nd.Element, "Text")}");
+                sb.AppendLine($"TextNoTags: {SafeMemberPath(nd.Element, "TextNoTags")}");
+                sb.AppendLine($"TextureName: {SafeMemberPath(nd.Element, "TextureName")}");
+                sb.AppendLine($"PathFromRoot: {SafeMemberPath(nd.Element, "PathFromRoot")}");
+
+                if (Settings.DebugPreferredDetails.Value)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("[Element members]");
+                    DumpObjectMembers(nd.Element, sb, 0, 2, new HashSet<object>(ReferenceEqualityComparer.Instance));
+                }
+
+                var path = Path.Combine(DirectoryFullName, "AtlasBiomeHighlighter.PreferredDebug.log");
+                File.AppendAllText(path, sb.ToString());
+            }
+            catch
+            {
+                // Debug must never break rendering.
+            }
+        }
+
+        private static string SafeMemberPath(object? obj, string path)
+        {
+            try
+            {
+                object? cur = obj;
+                foreach (var part in path.Split('.'))
+                {
+                    cur = GetDebugMember(cur, part);
+                    if (cur == null)
+                        return string.Empty;
+                }
+                return cur.ToString() ?? string.Empty;
+            }
+            catch { return string.Empty; }
+        }
+
+        private static object? GetDebugMember(object? obj, string name)
+        {
+            if (obj == null) return null;
+            var t = obj.GetType();
+            var p = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+            if (p != null && p.GetIndexParameters().Length == 0)
+            {
+                try { return p.GetValue(obj); } catch { return null; }
+            }
+            var f = t.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+            if (f != null)
+            {
+                try { return f.GetValue(obj); } catch { return null; }
+            }
+            return null;
+        }
+
+        private static void DumpObjectMembers(object? obj, StringBuilder sb, int depth, int maxDepth, HashSet<object> seen)
+        {
+            if (obj == null || depth > maxDepth) return;
+            var t = obj.GetType();
+
+            if (!t.IsValueType && !seen.Add(obj))
+                return;
+
+            string indent = new string(' ', depth * 2);
+            sb.AppendLine($"{indent}{t.FullName}");
+
+            foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (p.GetIndexParameters().Length > 0) continue;
+                object? val = null;
+                try { val = p.GetValue(obj); } catch { }
+                sb.AppendLine($"{indent}  P:{p.Name} = {FormatDebugValue(val)}");
+
+                if (depth < maxDepth && ShouldExpandDebugMember(p.Name, val))
+                    DumpObjectMembers(val, sb, depth + 1, maxDepth, seen);
+            }
+
+            foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                object? val = null;
+                try { val = f.GetValue(obj); } catch { }
+                sb.AppendLine($"{indent}  F:{f.Name} = {FormatDebugValue(val)}");
+
+                if (depth < maxDepth && ShouldExpandDebugMember(f.Name, val))
+                    DumpObjectMembers(val, sb, depth + 1, maxDepth, seen);
+            }
+        }
+
+        private static bool ShouldExpandDebugMember(string name, object? val)
+        {
+            if (val == null) return false;
+            if (val is string) return false;
+            var t = val.GetType();
+            if (t.IsPrimitive || t.IsEnum || t == typeof(decimal)) return false;
+            var u = name.ToUpperInvariant();
+            return u == "AREA" || u == "ATLASPANELNODE" || u == "NODE" || u == "ENTITY" || u.Contains("AREA") || u.Contains("BIOME");
+        }
+
+        private static string FormatDebugValue(object? val)
+        {
+            if (val == null) return "null";
+            if (val is string s) return s;
+            try { return val.ToString() ?? string.Empty; } catch { return "<ToString failed>"; }
+        }
+
+        private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
+        {
+            public static readonly ReferenceEqualityComparer Instance = new();
+
+            public new bool Equals(object? x, object? y) => ReferenceEquals(x, y);
+
+            public int GetHashCode(object obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
         }
 
         public override bool Initialise()

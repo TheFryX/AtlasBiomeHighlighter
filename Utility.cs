@@ -121,10 +121,18 @@ namespace AtlasBiomeHighlighter
 
         public static Biome TryGetBiome(AtlasNodeDescription nd)
         {
-            // Prefer direct .Biome if available
+            // Prefer direct .Biome if available.
+            // In current ExileCore2, Element.Biome can be an EndgameMapBiome object where ToString()
+            // may be unstable/empty, but its Id contains values like "Ocean".
             var candidate = GetMember(nd.Element, "Biome");
             var name = ExtractString(candidate);
             var parsed = BiomeUtils.ParseOrUnknown(name);
+            if (parsed != Biome.Unknown) return parsed;
+
+            parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Id")));
+            if (parsed != Biome.Unknown) return parsed;
+
+            parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Name")));
             if (parsed != Biome.Unknown) return parsed;
 
             // Try common hops
@@ -152,7 +160,6 @@ namespace AtlasBiomeHighlighter
             DeadlyBoss = 1 << 0,
             CorruptedNexus = 1 << 1,
             UniqueMap = 1 << 2,
-            AbyssOverrun = 1 << 4,
             MomentofZen = 1 << 5,
             Cleansed = 1 << 6,
         }
@@ -238,8 +245,6 @@ namespace AtlasBiomeHighlighter
             // Corrupted Nexus icon (per screenshot): AtlasIconContentCorruptionNexus.dds
             if (u.Contains("ATLASICONCONTENTCORRUPTIONNEXUS") || u.Contains("ATLASICONCONTENTCORRUPTEDNEXUS")) { flags |= SpecialFlags.CorruptedNexus; flags &= ~SpecialFlags.UniqueMap; }
 
-            // Abyss overrun icon
-            if (u.Contains("ATLASICONCONTENTABYSSOVERRUN")) flags |= SpecialFlags.AbyssOverrun;
             // Trader (Moment of Zen / Merchant)
             if (u.Contains("ATLASICONCONTENTTRADER")) { flags |= SpecialFlags.MomentofZen; flags &= ~SpecialFlags.UniqueMap; }
 

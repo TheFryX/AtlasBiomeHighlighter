@@ -6,6 +6,9 @@ namespace AtlasBiomeHighlighter
     public enum Biome
     {
         Water,
+        Ocean,
+        BreachCity,
+        OriathCity,
         Swamp,
         Mountain,
         Forest,
@@ -22,6 +25,9 @@ namespace AtlasBiomeHighlighter
         private static readonly Dictionary<Biome, string> _display = new()
         {
             [Biome.Water] = "Water",
+            [Biome.Ocean] = "Ocean",
+            [Biome.BreachCity] = "BreachCity",
+            [Biome.OriathCity] = "OriathCity",
             [Biome.Swamp] = "Swamp",
             [Biome.Mountain] = "Mountain",
             [Biome.Forest] = "Forest",
@@ -45,6 +51,9 @@ namespace AtlasBiomeHighlighter
             if (u.Contains("MAPUBERBOSS_STONECITADEL") || u.Contains("VAALCITY")) return Biome.Citadel_Stone;
             if (u.Contains("MAPUBERBOSS_COPPERCITADEL") || u.Contains("FARIDUNCITY")) return Biome.Citadel_Copper;
 
+            if (u.Contains("BREACHCITY")) return Biome.BreachCity;
+            if (u.Contains("ORIATHCITY")) return Biome.OriathCity;
+            if (u.Contains("OCEAN")) return Biome.Ocean;
             if (u.Contains("WATER")) return Biome.Water;
             if (u.Contains("SWAMP")) return Biome.Swamp;
             if (u.Contains("MOUNTAIN")) return Biome.Mountain;
