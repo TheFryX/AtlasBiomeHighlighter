@@ -312,6 +312,7 @@ namespace AtlasBiomeHighlighter
             DrawHighlightRow("Corrupted Nexus", s.HighlightCorruptedNexus.Value, v => s.HighlightCorruptedNexus.Value = v, "CorruptedNexus", s.CorruptedNexusRingColor.Value, c => s.CorruptedNexusRingColor.Value = c);
             DrawHighlightRow("Cleansed", s.HighlightCleansed.Value, v => s.HighlightCleansed.Value = v, "Cleansed", s.CleansedRingColor.Value, c => s.CleansedRingColor.Value = c);
             DrawHighlightRow("Unique maps", s.HighlightUniqueMaps.Value, v => s.HighlightUniqueMaps.Value = v, "UniqueMap", s.UniqueMapRingColor.Value, c => s.UniqueMapRingColor.Value = c);
+            DrawHighlightRow("Area contains Abysses", s.HighlightAreaContainsAbyss.Value, v => s.HighlightAreaContainsAbyss.Value = v, "AreaContainsAbyss", s.AreaContainsAbyssRingColor.Value, c => s.AreaContainsAbyssRingColor.Value = c);
 
             ImGui.Separator();
             { int v = s.SpecialRingThickness.Value; if (ImGui.SliderInt("Special ring thickness", ref v, s.SpecialRingThickness.Min, s.SpecialRingThickness.Max)) s.SpecialRingThickness.Value = v; }

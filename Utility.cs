@@ -162,6 +162,7 @@ namespace AtlasBiomeHighlighter
             UniqueMap = 1 << 2,
             MomentofZen = 1 << 5,
             Cleansed = 1 << 6,
+            AreaContainsAbyss = 1 << 7,
         }
 
         public static SpecialFlags TryGetSpecialFlags(AtlasNodeDescription nd)
@@ -180,6 +181,11 @@ namespace AtlasBiomeHighlighter
                         flags |= SpecialFlags.UniqueMap;
                 }
 
+                // AtlasEntry.Id contains league/atlas modifiers such as AtlasLeagueAbyssInnerNode18_.
+                var atlasEntry = GetMember(root, "AtlasEntry");
+                ClassifyStrict(ExtractString(GetMember(atlasEntry, "Id")), ref flags);
+                ClassifyStrict(ExtractString(atlasEntry), ref flags);
+
                 // Deep scan for strict markers
                 var stack = new System.Collections.Generic.Stack<object?>();
                 stack.Push(root);
@@ -193,7 +199,7 @@ namespace AtlasBiomeHighlighter
                     {
                         if (p.GetIndexParameters().Length > 0) continue;
                         var nameU = p.Name.ToUpperInvariant();
-                        if (nameU.Contains("TEXT") || nameU.Contains("LABEL") || nameU.Contains("TOOLTIP") || nameU.Contains("STRING") || nameU.Contains("CAPTION") || nameU.Contains("TEXTURE") || nameU.Contains("ICON") || nameU.Contains("TEXTURENAME"))
+                        if (nameU.Contains("TEXT") || nameU.Contains("LABEL") || nameU.Contains("TOOLTIP") || nameU.Contains("STRING") || nameU.Contains("CAPTION") || nameU.Contains("TEXTURE") || nameU.Contains("ICON") || nameU.Contains("TEXTURENAME") || nameU.Contains("ATLASENTRY") || nameU == "ID")
                         {
                             string? val = null;
                             try { val = ExtractString(p.GetValue(cur)); } catch {}
@@ -203,7 +209,7 @@ namespace AtlasBiomeHighlighter
                     foreach (var f in t.GetFields(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
                     {
                         var nameU = f.Name.ToUpperInvariant();
-                        if (nameU.Contains("TEXT") || nameU.Contains("LABEL") || nameU.Contains("TOOLTIP") || nameU.Contains("STRING") || nameU.Contains("CAPTION") || nameU.Contains("TEXTURE") || nameU.Contains("ICON") || nameU.Contains("TEXTURENAME"))
+                        if (nameU.Contains("TEXT") || nameU.Contains("LABEL") || nameU.Contains("TOOLTIP") || nameU.Contains("STRING") || nameU.Contains("CAPTION") || nameU.Contains("TEXTURE") || nameU.Contains("ICON") || nameU.Contains("TEXTURENAME") || nameU.Contains("ATLASENTRY") || nameU == "ID")
                         {
                             string? val = null;
                             try { val = ExtractString(f.GetValue(cur)); } catch {}
@@ -235,6 +241,11 @@ namespace AtlasBiomeHighlighter
         {
             if (string.IsNullOrWhiteSpace(s)) return;
             var u = s.ToUpperInvariant();
+
+            // Area contains Abysses / Abyss atlas node.
+            // Observed AtlasEntry.Id examples: AtlasLeagueAbyssInnerNode18_, AtlasLeagueAbyssInnerNode23.
+            if (u.Contains("ATLASLEAGUEABYSS") || u.Contains("AREA CONTAINS ABYSS") || u.Contains("AREA CONTAINS ABYSSES"))
+                flags |= SpecialFlags.AreaContainsAbyss;
 
             // Strict Deadly Map Boss markers:
             //  - TextureName ends with AtlasIconContentMapBossSpecial.dds

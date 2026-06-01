@@ -134,7 +134,8 @@ namespace AtlasBiomeHighlighter
                     ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
                     ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
                     ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value) ||
-                    ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value);
+                    ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value) ||
+                    ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value);
 
                 // Preferred maps (token matching is cache-only; no API calls).
                 bool preferredWanted = false;
@@ -205,6 +206,12 @@ namespace AtlasBiomeHighlighter
                     Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
                 }
 
+                if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value)
+                {
+                    var c = Utility.WithOpacity(Settings.AreaContainsAbyssRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    Graphics.DrawCircle(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, 24);
+                }
+
                 if (Settings.ShowLabels.Value)
                 {
                     string text;
@@ -249,6 +256,7 @@ namespace AtlasBiomeHighlighter
                         if ((sflags & Utility.SpecialFlags.MomentofZen) != 0) text += " [Moment Of Zen]";
                         if ((sflags & Utility.SpecialFlags.Cleansed) != 0) text += " [Cleansed]";
                         if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
+                        if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0) text += " [Abyss]";
                         if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
                         if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
                     }
