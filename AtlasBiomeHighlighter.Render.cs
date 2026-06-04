@@ -123,58 +123,69 @@ namespace AtlasBiomeHighlighter
                 if (preferredWanted)
                     DebugPreferredMapHit(nd, preferredMatchedToken ?? string.Empty, preferredMatchedToken == null ? null : GetPreferredTag(preferredMatchedToken), info.MapName, biome, sflags);
 
-                if (!biomeVisible && !(specialWanted || preferredWanted))
+                bool renderOverlay = biomeVisible || specialWanted || preferredWanted;
+                bool renderMapNameLabelOnly =
+                    Settings.ShowLabels.Value &&
+                    Settings.ShowMapNames.Value &&
+                    !string.IsNullOrWhiteSpace(info.MapName);
+
+                // Biome visibility controls rings/highlights, not map-name labels.
+                // When Show map names is enabled, users expect every resolved map name to be visible
+                // even if that biome is unchecked in the Biomes section.
+                if (!renderOverlay && !renderMapNameLabelOnly)
                     continue;
-                if (!Settings.Colors.TryGetValue(biome, out var colorNode))
-                    continue;
+
+                Settings.Colors.TryGetValue(biome, out var colorNode);
 
                 if (profileRenderSections)
                     renderNodeFilterTicks += Stopwatch.GetTimestamp() - __filterStart;
 
                 long __ringsStart = profileRenderSections ? Stopwatch.GetTimestamp() : 0;
-                var ringColor = Utility.WithOpacity(colorNode.Value, Settings.Opacity.Value);
+                var baseColor = colorNode?.Value ?? Settings.LabelTextColor.Value;
+                var ringColor = Utility.WithOpacity(baseColor, Settings.Opacity.Value);
                 // Screen-space position changes while panning/zooming the atlas. Don't cache it; read it from the element each frame.
                 var center = new Vector2(info.Node.Element.Center.X, info.Node.Element.Center.Y);
                 var radius = Settings.NodeRadius.Value;
                 var thickness = Settings.RingThickness.Value;
 
-                DrawCircleFast(center, radius, ringColor, thickness, NodeCircleSegments);
+                if (renderOverlay)
+                    DrawCircleFast(center, radius, ringColor, thickness, NodeCircleSegments);
 
                 int extra = 0;
 
-                if (preferredWanted)
+                if (renderOverlay && preferredWanted)
                 {
                     var c = Utility.WithOpacity(Settings.PreferredMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
 
-                if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value)
+                if (renderOverlay && (sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value)
                 {
                     var c = Utility.WithOpacity(Settings.UniqueMapRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
-                if ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value)
+                if (renderOverlay && (sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value)
                 {
                     var c = Utility.WithOpacity(Settings.DeadlyBossRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
-                if ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value)
+                if (renderOverlay && (sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value)
                 {
                     var c = Utility.WithOpacity(Settings.MomentofZenRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
-                if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value)
+                if (renderOverlay && (sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value)
                 {
                     var c = Utility.WithOpacity(Settings.CorruptedNexusRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
-                if ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value)
+                if (renderOverlay && (sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value)
                 {
                     var c = Utility.WithOpacity(Settings.CleansedRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
 
-                if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value)
+                if (renderOverlay && (sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value)
                 {
                     var c = Utility.WithOpacity(Settings.AreaContainsAbyssRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
@@ -187,12 +198,22 @@ namespace AtlasBiomeHighlighter
                 {
                     long __labelsStart = profileRenderSections ? Stopwatch.GetTimestamp() : 0;
                     string text;
+                    bool labelContainsMapName = false;
+                    bool hasMapName = !string.IsNullOrWhiteSpace(info.MapName);
 
-                    if (Settings.PreferMapNameForDeadly.Value &&
+                    if (biomeVisible && hasMapName)
+                    {
+                        // When a biome is explicitly enabled, the biome label should be descriptive
+                        // regardless of the global "Show map names" toggle: "Map Name - Biome".
+                        text = $"{info.MapName} - {info.BiomeDisplay}";
+                        labelContainsMapName = true;
+                    }
+                    else if (Settings.PreferMapNameForDeadly.Value &&
                         (sflags & Utility.SpecialFlags.DeadlyBoss) != 0 &&
-                        !string.IsNullOrWhiteSpace(info.MapName))
+                        hasMapName)
                     {
                         text = info.MapName!;
+                        labelContainsMapName = true;
                     }
                     else if (Settings.ShowUniqueNameOnLabel.Value &&
                              (sflags & Utility.SpecialFlags.UniqueMap) != 0 &&
@@ -202,14 +223,12 @@ namespace AtlasBiomeHighlighter
                     }
                     else
                     {
-                        // Do not show normal map-name labels for Unknown biome nodes.
-                        // After the atlas update some nodes expose incomplete/stale Area.Name data while
-                        // their biome is still unresolved, which can place unrelated map names on the atlas.
-                        // Special cases above (Deadly/Unique) may still use their explicit map/unique name.
-                        if (Settings.ShowMapNames.Value && biome != Biome.Unknown && !string.IsNullOrWhiteSpace(info.MapName))
+                        if (Settings.ShowMapNames.Value && hasMapName)
                         {
-                            // UX: when map names are enabled, show "MapName - Biome" to keep biome context.
-                            text = string.IsNullOrWhiteSpace(info.BiomeDisplay) ? info.MapName! : (info.MapName! + " - " + info.BiomeDisplay);
+                            // UX: when only Show map names is enabled, show every resolved map name only.
+                            // The label still uses the biome color, but does not append biome text.
+                            text = info.MapName!;
+                            labelContainsMapName = true;
                         }
                         else
                         {
@@ -217,10 +236,10 @@ namespace AtlasBiomeHighlighter
                         }
                     }
 
-                    // If a special/unique-name path selected the label text, keep biome context when map names are enabled.
-                    // For normal Unknown nodes keep the label as just "Unknown" to avoid stale/wrong map names.
-                    if (Settings.ShowMapNames.Value && biome != Biome.Unknown && text.IndexOf(" - ", StringComparison.Ordinal) < 0 && !string.IsNullOrWhiteSpace(info.BiomeDisplay))
-                        text = text + " - " + info.BiomeDisplay;
+                    // Behaviour summary:
+                    // - Show map names only: "Map Name" for all visible resolved maps.
+                    // - Enabled biome: "Map Name - Biome" even if Show map names is disabled.
+                    // - Unknown/unresolved map name falls back to the biome text.
 
                     if (Settings.ShowSpecialTag.Value)
                     {
@@ -234,14 +253,14 @@ namespace AtlasBiomeHighlighter
                     }
 
                     var size = MeasureTextCached(text);
-                    var offsetY = Settings.ShowMapNames.Value ? Settings.MapNameOffsetY.Value : Settings.LabelOffset.Value;
+                    var offsetY = labelContainsMapName ? Settings.MapNameOffsetY.Value : Settings.LabelOffset.Value;
                     var pos = new Vector2(center.X - size.X / 2f, center.Y - (radius + offsetY));
 
                     // Apply Label Settings.
                     var textColor = Settings.LabelUseBiomeColor.Value ? ringColor : Settings.LabelTextColor.Value;
 
-                    // Darken unreached nodes when showing map names.
-                    if (Settings.ShowMapNames.Value && !(info.Visited || info.Unlocked))
+                    // Darken unreached nodes when showing map-name labels.
+                    if (labelContainsMapName && !(info.Visited || info.Unlocked))
                     {
                         textColor = System.Drawing.Color.FromArgb(
                             textColor.A,
@@ -628,10 +647,15 @@ namespace AtlasBiomeHighlighter
                     (idToken.Length != 0 && _preferredTokensExact.Contains(idToken));
             }
 
+            // Biome visibility controls rings/highlights, not map-name labels.
+            // The main overlay now renders resolved map names even when the biome is unchecked.
+            if (Utility.TryGetAnyMapName(nd, sflags, out var mapName) && !string.IsNullOrWhiteSpace(mapName))
+                return true;
+
             if (!biomeVisible && !(specialWanted || preferredWanted))
                 return false;
 
-            // The main overlay also requires a biome color entry to proceed.
+            // Highlight overlays still require a biome color entry to proceed.
             return Settings.Colors.ContainsKey(biome);
         }
 
