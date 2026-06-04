@@ -21,6 +21,29 @@ namespace AtlasBiomeHighlighter
         // Colors are setting-derived and repeat heavily, so cache the packed ImGui color.
         private readonly Dictionary<int, uint> _imguiColorCache = new(128);
         private const int ImGuiColorCacheMaxEntries = 512;
+
+        // Stage10: connection rendering is draw-call heavy and used while panning the atlas.
+        // Cache screen-space endpoints/status for the current render pass so every connection
+        // does not repeatedly query atlas elements, status dictionaries and node lookups.
+        private readonly Dictionary<(int x, int y), ConnectionRenderNode> _connectionRenderNodeCache = new(2048);
+        private const float ConnectionViewportPadding = 96f;
+        private const float MinConnectionLengthSquared = 4f;
+        private long _lastConnectionDiagnosticLogMs;
+
+        private readonly struct ConnectionRenderNode
+        {
+            public ConnectionRenderNode(Vector2 center, bool unlocked, bool visited)
+            {
+                Center = center;
+                Unlocked = unlocked;
+                Visited = visited;
+            }
+
+            public Vector2 Center { get; }
+            public bool Unlocked { get; }
+            public bool Visited { get; }
+        }
+
         public override void Render()
         {
             using var renderProfile = ProfileScope("Render total");
@@ -99,7 +122,8 @@ namespace AtlasBiomeHighlighter
                     ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
                     ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value) ||
                     ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value) ||
-                    ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value);
+                    ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value) ||
+                    ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0 && Settings.HighlightAreaContainsExpedition.Value);
 
                 // Preferred maps (token matching is cache-only; no API calls).
                 bool preferredWanted = false;
@@ -191,6 +215,12 @@ namespace AtlasBiomeHighlighter
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
 
+                if (renderOverlay && (sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0 && Settings.HighlightAreaContainsExpedition.Value)
+                {
+                    var c = Utility.WithOpacity(Settings.AreaContainsExpeditionRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
+                }
+
                 if (profileRenderSections)
                     renderNodeRingsTicks += Stopwatch.GetTimestamp() - __ringsStart;
 
@@ -248,6 +278,7 @@ namespace AtlasBiomeHighlighter
                         if ((sflags & Utility.SpecialFlags.Cleansed) != 0) text += " [Cleansed]";
                         if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
                         if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0) text += " [Abyss]";
+                        if ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0) text += " [Expedition]";
                         if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
                         if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
                     }
@@ -313,39 +344,125 @@ namespace AtlasBiomeHighlighter
 
         private void RenderMapConnections()
         {
-            if (_neighborsByCoord.Count == 0) return;
+            if (_visibleConnectionSegments.Count == 0) return;
+
+            bool diagnostics = Settings.DebugMode.Value && Settings.PerformanceProfiling.Value;
+            long totalStart = diagnostics ? Stopwatch.GetTimestamp() : 0;
+            long setupTicks = 0;
+            long loopTicks = 0;
+            long cullTicks = 0;
+            long drawTicks = 0;
+            int visitedSkipped = 0;
+            int offscreenSkipped = 0;
+            int tinySkipped = 0;
+            int staleSkipped = 0;
+            int drawnConnections = 0;
+
+            long setupStart = diagnostics ? Stopwatch.GetTimestamp() : 0;
+
             int thickness = Settings.ConnectionThickness.Value;
+            bool drawVisitedConnections = Settings.DrawVisitedConnections.Value;
+            var unlockedColor = Settings.ConnectionColor.Value;
+            var lockedColor = Settings.ConnectionColorLocked.Value;
 
-            foreach (var nd in _visibleNodes)
+            var displaySize = ImGui.GetIO().DisplaySize;
+            var drawList = ImGui.GetForegroundDrawList();
+            uint unlockedPackedColor = GetCachedImGuiColor(unlockedColor);
+            uint lockedPackedColor = GetCachedImGuiColor(lockedColor);
+
+            float minX = -ConnectionViewportPadding;
+            float minY = -ConnectionViewportPadding;
+            float maxX = displaySize.X + ConnectionViewportPadding;
+            float maxY = displaySize.Y + ConnectionViewportPadding;
+
+            if (diagnostics) setupTicks = Stopwatch.GetTimestamp() - setupStart;
+            long loopStart = diagnostics ? Stopwatch.GetTimestamp() : 0;
+
+            // Stage11: the expensive visible-node seed, neighbor walking and duplicate removal
+            // are done when the visible cache is published. Render only draws prepared segments.
+            for (int i = 0; i < _visibleConnectionSegments.Count; i++)
             {
-                if (nd?.Element is null) continue;
-                if (!TryGetCoordinate(nd, out var c)) continue;
-                var srcKey = (x: c.X, y: c.Y);
-                if (!_neighborsByCoord.TryGetValue(srcKey, out var nbs)) continue;
-
-                var srcPos = new Vector2(nd.Element.Center.X, nd.Element.Center.Y);
-
-                for (int i = 0; i < nbs.Count; i++)
+                var segment = _visibleConnectionSegments[i];
+                var srcElement = segment.Source.Element;
+                var dstElement = segment.Target.Element;
+                if (srcElement is null || dstElement is null)
                 {
-                    var dstKey = nbs[i];
-                    // Prevent double-draw (lexicographic).
-                    if (dstKey.x < srcKey.x || (dstKey.x == srcKey.x && dstKey.y <= srcKey.y)) continue;
-
-                    if (!_nodeByCoord.TryGetValue(dstKey, out var dstNd) || dstNd?.Element is null) continue;
-
-                    bool srcUnlocked, srcVisited, srcCompleted;
-                    bool dstUnlocked, dstVisited, dstCompleted;
-                    TryGetStatus(srcKey, out srcUnlocked, out srcVisited, out srcCompleted);
-                    TryGetStatus(dstKey, out dstUnlocked, out dstVisited, out dstCompleted);
-
-                    if (!Settings.DrawVisitedConnections.Value && (srcVisited || dstVisited))
-                        continue;
-
-                    var color = (srcUnlocked && dstUnlocked) ? Settings.ConnectionColor.Value : Settings.ConnectionColorLocked.Value;
-                    var dstPos = new Vector2(dstNd.Element.Center.X, dstNd.Element.Center.Y);
-                    Graphics.DrawLine(srcPos, dstPos, thickness, color);
+                    staleSkipped++;
+                    continue;
                 }
+
+                if (!drawVisitedConnections && (segment.SourceVisited || segment.TargetVisited))
+                {
+                    visitedSkipped++;
+                    continue;
+                }
+
+                var a = new Vector2(srcElement.Center.X, srcElement.Center.Y);
+                var b = new Vector2(dstElement.Center.X, dstElement.Center.Y);
+
+                long cullStart = diagnostics ? Stopwatch.GetTimestamp() : 0;
+
+                if ((a.X < minX && b.X < minX) ||
+                    (a.X > maxX && b.X > maxX) ||
+                    (a.Y < minY && b.Y < minY) ||
+                    (a.Y > maxY && b.Y > maxY))
+                {
+                    if (diagnostics) cullTicks += Stopwatch.GetTimestamp() - cullStart;
+                    offscreenSkipped++;
+                    continue;
+                }
+
+                if (Vector2.DistanceSquared(a, b) <= MinConnectionLengthSquared)
+                {
+                    if (diagnostics) cullTicks += Stopwatch.GetTimestamp() - cullStart;
+                    tinySkipped++;
+                    continue;
+                }
+
+                if (diagnostics) cullTicks += Stopwatch.GetTimestamp() - cullStart;
+
+                long drawStart = diagnostics ? Stopwatch.GetTimestamp() : 0;
+                drawList.AddLine(a, b, (segment.SourceUnlocked && segment.TargetUnlocked) ? unlockedPackedColor : lockedPackedColor, thickness);
+                if (diagnostics) drawTicks += Stopwatch.GetTimestamp() - drawStart;
+                drawnConnections++;
             }
+
+            if (!diagnostics)
+                return;
+
+            loopTicks = Stopwatch.GetTimestamp() - loopStart;
+            long totalTicks = Stopwatch.GetTimestamp() - totalStart;
+
+            ReportProfileElapsedTicks("Connections setup", setupTicks);
+            ReportProfileElapsedTicks("Connections loop total", loopTicks);
+            ReportProfileElapsedTicks("Connections culling", cullTicks);
+            ReportProfileElapsedTicks("Connections draw AddLine", drawTicks);
+
+            double totalMs = totalTicks * 1000.0 / Stopwatch.Frequency;
+            if (totalMs >= Settings.PerformanceSpikeThresholdMs.Value)
+                ReportConnectionDiagnosticSummary(totalMs, _visibleConnectionSegments.Count, drawnConnections, visitedSkipped, offscreenSkipped, tinySkipped, staleSkipped);
+        }
+
+        private void ReportConnectionDiagnosticSummary(
+            double totalMs,
+            int preparedSegments,
+            int drawnConnections,
+            int visitedSkipped,
+            int offscreenSkipped,
+            int tinySkipped,
+            int staleSkipped)
+        {
+            if (!Settings.DebugMode.Value || !Settings.PerformanceProfiling.Value)
+                return;
+
+            long now = Environment.TickCount64;
+            if (now - _lastConnectionDiagnosticLogMs < 500)
+                return;
+
+            _lastConnectionDiagnosticLogMs = now;
+            LogMessage(
+                $"[AtlasBiomeHighlighter] Connections diagnostics: total={totalMs:F2} ms, prepared={preparedSegments}, drawn={drawnConnections}, visitedSkip={visitedSkipped}, offscreenSkip={offscreenSkipped}, tinySkip={tinySkipped}, staleSkip={staleSkipped}",
+                3);
         }
 
         private void RenderWaypoints()
@@ -636,7 +753,9 @@ namespace AtlasBiomeHighlighter
                 ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
                 ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
                 ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0 && Settings.HighlightCorruptedNexus.Value) ||
-                ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value);
+                ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value) ||
+                ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value) ||
+                ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0 && Settings.HighlightAreaContainsExpedition.Value);
 
             bool preferredWanted = false;
             if (Settings.HighlightPreferredMaps.Value && !isDeadly && TryGetCachedNodeTokens(nd, out var nameToken, out var idToken))

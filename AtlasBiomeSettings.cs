@@ -92,6 +92,8 @@ namespace AtlasBiomeHighlighter
         public ColorNode UniqueMapRingColor { get; set; } = new(Color.FromArgb(255, 165, 0));
         public ToggleNode HighlightAreaContainsAbyss { get; set; } = new(true);
         public ColorNode AreaContainsAbyssRingColor { get; set; } = new(Color.FromArgb(120, 80, 255));
+        public ToggleNode HighlightAreaContainsExpedition { get; set; } = new(true);
+        public ColorNode AreaContainsExpeditionRingColor { get; set; } = new(Color.FromArgb(255, 170, 40));
         public ToggleNode HighlightPreferredMaps { get; set; } = new(false);
         public ColorNode PreferredMapRingColor { get; set; } = new(Color.FromArgb(0, 206, 209)); // teal
 

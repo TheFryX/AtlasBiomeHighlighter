@@ -25,6 +25,37 @@ namespace AtlasBiomeHighlighter
         // Cached flags by coordinate for graph rendering/pathfinding (connections, etc.).
         private Dictionary<(int x, int y), NodeStatus> _statusByCoord = new(1024);
 
+        // Stage11: prebuilt, de-duplicated connection segments for the current visible atlas cache.
+        // Render() must only draw these prepared segments; it should not seed visible nodes,
+        // walk neighbor lists, or remove duplicate edges every frame.
+        private readonly List<ConnectionRenderSegment> _visibleConnectionSegments = new(768);
+
+        private readonly struct ConnectionRenderSegment
+        {
+            public ConnectionRenderSegment(
+                AtlasNodeDescription source,
+                AtlasNodeDescription target,
+                bool sourceUnlocked,
+                bool targetUnlocked,
+                bool sourceVisited,
+                bool targetVisited)
+            {
+                Source = source;
+                Target = target;
+                SourceUnlocked = sourceUnlocked;
+                TargetUnlocked = targetUnlocked;
+                SourceVisited = sourceVisited;
+                TargetVisited = targetVisited;
+            }
+
+            public AtlasNodeDescription Source { get; }
+            public AtlasNodeDescription Target { get; }
+            public bool SourceUnlocked { get; }
+            public bool TargetUnlocked { get; }
+            public bool SourceVisited { get; }
+            public bool TargetVisited { get; }
+        }
+
         private readonly struct NodeStatus
         {
             public NodeStatus(bool unlocked, bool visited, bool completed)
@@ -99,6 +130,7 @@ namespace AtlasBiomeHighlighter
                 _visibleNodes.Clear();
                 _visibleNodeInfos.Clear();
                 _statusByCoord.Clear();
+                _visibleConnectionSegments.Clear();
                 ResetVisibleCacheBuild();
                 return true;
             }
@@ -202,6 +234,50 @@ namespace AtlasBiomeHighlighter
             (_visibleNodes, _visibleNodesNext) = (_visibleNodesNext, _visibleNodes);
             (_visibleNodeInfos, _visibleNodeInfosNext) = (_visibleNodeInfosNext, _visibleNodeInfos);
             (_statusByCoord, _statusByCoordNext) = (_statusByCoordNext, _statusByCoord);
+
+            RebuildVisibleConnectionSegments();
+        }
+
+        private void RebuildVisibleConnectionSegments()
+        {
+            _visibleConnectionSegments.Clear();
+
+            if (_neighborsByCoord.Count == 0 || _visibleNodeInfos.Count == 0)
+                return;
+
+            for (int i = 0; i < _visibleNodeInfos.Count; i++)
+            {
+                var info = _visibleNodeInfos[i];
+                var nd = info.Node;
+                if (nd?.Element is null)
+                    continue;
+
+                var c = nd.Coordinate;
+                var srcKey = (x: c.X, y: c.Y);
+                if (!_neighborsByCoord.TryGetValue(srcKey, out var neighbors))
+                    continue;
+
+                for (int j = 0; j < neighbors.Count; j++)
+                {
+                    var dstKey = neighbors[j];
+
+                    // Build unique edges once. Render() should never pay this duplicate check cost.
+                    if (dstKey.x < srcKey.x || (dstKey.x == srcKey.x && dstKey.y <= srcKey.y))
+                        continue;
+
+                    if (!_nodeByCoord.TryGetValue(dstKey, out var dst) || dst?.Element is null)
+                        continue;
+
+                    TryGetStatus(dstKey, out var dstUnlocked, out var dstVisited, out _);
+                    _visibleConnectionSegments.Add(new ConnectionRenderSegment(
+                        nd,
+                        dst,
+                        info.Unlocked,
+                        dstUnlocked,
+                        info.Visited,
+                        dstVisited));
+                }
+            }
         }
 
         private void ResetVisibleCacheBuild()

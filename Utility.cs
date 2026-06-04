@@ -268,6 +268,7 @@ namespace AtlasBiomeHighlighter
             MomentofZen = 1 << 5,
             Cleansed = 1 << 6,
             AreaContainsAbyss = 1 << 7,
+            AreaContainsExpedition = 1 << 8,
         }
 
         public static SpecialFlags TryGetSpecialFlags(AtlasNodeDescription nd)
@@ -284,7 +285,17 @@ namespace AtlasBiomeHighlighter
                 {
                     if (id.StartsWith("MapUnique", System.StringComparison.OrdinalIgnoreCase))
                         flags |= SpecialFlags.UniqueMap;
+
+                    // Expedition atlas/logbook nodes do not expose the expedition marker via
+                    // ContentIdentity/AtlasChildren. The reliable marker is Area.Id, e.g.
+                    // ExpeditionLogBook_Tundra / ExpeditionLogBook_Tropical.
+                    ClassifyStrict(id, ref flags);
                 }
+
+                var area = GetMember(root, "Area");
+                ClassifyStrict(ExtractString(GetMember(area, "RawName")), ref flags);
+                ClassifyStrict(ExtractString(GetMember(area, "Name")), ref flags);
+                ClassifyStrict(ExtractString(area), ref flags);
 
                 // AtlasEntry.Id contains league/atlas modifiers such as AtlasLeagueAbyssInnerNode18_.
                 var atlasEntry = GetMember(root, "AtlasEntry");
@@ -350,6 +361,17 @@ namespace AtlasBiomeHighlighter
                 s.Contains("AREA CONTAINS ABYSS", StringComparison.OrdinalIgnoreCase) ||
                 s.Contains("AREA CONTAINS ABYSSES", StringComparison.OrdinalIgnoreCase))
                 flags |= SpecialFlags.AreaContainsAbyss;
+
+            // Expedition nodes. Hover dumps show the actual atlas node uses
+            // Area.Id = ExpeditionLogBook_Tundra / ExpeditionLogBook_Tropical while
+            // the side panel may expose ContainsExpedition / ContainsExpedition2 icons.
+            if (s.Contains("EXPEDITIONLOGBOOK", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("ATLASLEAGUEEXPEDITION", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("CONTAINSEXPEDITION", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("KALGUURAN EXPEDITION", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("VERISIUM REMNANTS", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("ATLASICONCONTENTEXPEDITION", StringComparison.OrdinalIgnoreCase))
+                flags |= SpecialFlags.AreaContainsExpedition;
 
             // Strict Deadly Map Boss markers:
             //  - TextureName ends with AtlasIconContentMapBossSpecial.dds
