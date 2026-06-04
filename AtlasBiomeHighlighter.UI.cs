@@ -67,6 +67,7 @@ namespace AtlasBiomeHighlighter
             { int v = s.WaypointRingRadius.Value; if (ImGui.SliderInt("Waypoint ring radius", ref v, s.WaypointRingRadius.Min, s.WaypointRingRadius.Max)) s.WaypointRingRadius.Value = v; }
             { int v = s.WaypointRingThickness.Value; if (ImGui.SliderInt("Waypoint ring thickness", ref v, s.WaypointRingThickness.Min, s.WaypointRingThickness.Max)) s.WaypointRingThickness.Value = v; }
             { int v = s.ShortestPathThickness.Value; if (ImGui.SliderInt("Shortest path thickness", ref v, s.ShortestPathThickness.Min, s.ShortestPathThickness.Max)) s.ShortestPathThickness.Value = v; }
+
             ImGui.Unindent();
         }
 
@@ -330,6 +331,12 @@ namespace AtlasBiomeHighlighter
             { bool v = s.DebugPreferredMaps.Value; if (ImGui.Checkbox("Debug Preferred map hits to file", ref v)) s.DebugPreferredMaps.Value = v; }
             { bool v = s.DebugPreferredDetails.Value; if (ImGui.Checkbox("Debug include reflected node details", ref v)) s.DebugPreferredDetails.Value = v; }
             ImGui.TextDisabled("Debug log: plugin folder / AtlasBiomeHighlighter.PreferredDebug.log");
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Performance diagnostics");
+            ImGui.TextDisabled("Profiler is active only when Debug mode is enabled.");
+            { bool v = s.PerformanceProfiling.Value; if (ImGui.Checkbox("Spike profiler", ref v)) s.PerformanceProfiling.Value = v; }
+            { int v = s.PerformanceSpikeThresholdMs.Value; if (ImGui.SliderInt("Spike threshold ms", ref v, s.PerformanceSpikeThresholdMs.Min, s.PerformanceSpikeThresholdMs.Max)) s.PerformanceSpikeThresholdMs.Value = v; }
 
             ImGui.Separator();
             ImGui.TextDisabled("Refresh / cache timings");

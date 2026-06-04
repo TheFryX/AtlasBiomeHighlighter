@@ -15,7 +15,7 @@ namespace AtlasBiomeHighlighter
     {
         private ExileCore2.PoEMemory.Elements.AtlasElements.AtlasPanel? _atlasPanel;
         private AtlasNodeDescription[] _atlasNodes = Array.Empty<AtlasNodeDescription>();
-        private readonly System.Collections.Generic.List<AtlasNodeDescription> _visibleNodes = new();
+        private System.Collections.Generic.List<AtlasNodeDescription> _visibleNodes = new();
         private readonly HashSet<string> _preferredDebugLogged = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly Stopwatch _atlasRefreshSw = new();
@@ -262,6 +262,7 @@ namespace AtlasBiomeHighlighter
         {
             _atlasNodes = Array.Empty<AtlasNodeDescription>();
             _visibleNodes.Clear();
+            ResetPreferredGuideDiscovery();
             _atlasRefreshSw.Restart();
             _screenRefreshSw.Restart();
         }
@@ -379,6 +380,7 @@ namespace AtlasBiomeHighlighter
 
         public override void Tick()
         {
+            using var tickProfile = ProfileScope("Tick total");
             _atlasPanel = GameController?.IngameState?.IngameUi?.WorldMap?.AtlasPanel;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
 
@@ -389,17 +391,33 @@ namespace AtlasBiomeHighlighter
             // Keep viewport dimensions up-to-date (ultrawide/windowed changes).
             UpdateViewportSize();
 
+            // Preferred guide discovery is time-sliced. Never scan the whole atlas from Render().
+            using (ProfileScope("Preferred guide discovery"))
+            {
+                UpdatePreferredGuideDiscovery();
+            }
+
             if (_atlasRefreshSw.ElapsedMilliseconds > Settings.AtlasRefreshMs.Value)
             {
                 _atlasNodes = _atlasPanel.Descriptions?.ToArray() ?? Array.Empty<AtlasNodeDescription>();
+                ResetVisibleCacheBuild();
                 _atlasRefreshSw.Restart();
 
                 // Rebuild graph caches (connections/waypoints/pathfinding) on atlas refresh.
-                RefreshGraphCaches();
-                SyncSelectedWaypoint();
+                using (ProfileScope("Refresh graph caches"))
+                {
+                    RefreshGraphCaches();
+                    SyncSelectedWaypoint();
+                }
             }
 
-            if (_screenRefreshSw.ElapsedMilliseconds > Settings.ScreenRefreshMs.Value)
+            // Stage2b: keep map-name labels responsive while preserving time-sliced cache rebuilds.
+            // User setting remains respected when it is lower; otherwise cap effective latency for visible labels.
+            int effectiveScreenRefreshMs = Settings.ShowLabels.Value
+                ? Math.Min(Settings.ScreenRefreshMs.Value, 250)
+                : Settings.ScreenRefreshMs.Value;
+
+            if (_visibleCacheBuildInProgress || _screenRefreshSw.ElapsedMilliseconds > effectiveScreenRefreshMs)
             {
                 // Prune token cache when atlas nodes change noticeably.
                 // This is cheap and prevents cache growth across atlas refreshes.
@@ -409,13 +427,23 @@ namespace AtlasBiomeHighlighter
                     _nodeTokenCache.Clear();
                 }
 
-                // Rebuild visibility & per-node caches at the throttled refresh interval.
-                // This moves expensive memory reads out of the Render() hot-path.
-                RebuildVisibleCaches();
+                // Stage2: visibility/status cache rebuild is incremental.
+                // Render keeps using the last completed cache while this pass is still building.
+                bool visibleCachesReady;
+                using (ProfileScope("Rebuild visible caches"))
+                {
+                    visibleCachesReady = RebuildVisibleCaches();
+                }
 
-                // Hover-learned tooltip stats and path recomputation are safe to throttle.
-                RecomputeShortestPathIfNeeded();
-                _screenRefreshSw.Restart();
+                if (visibleCachesReady)
+                {
+                    // Hover-learned tooltip stats and path recomputation are safe to throttle.
+                    using (ProfileScope("Recompute shortest path"))
+                    {
+                        RecomputeShortestPathIfNeeded();
+                    }
+                    _screenRefreshSw.Restart();
+                }
             }
         }
     }

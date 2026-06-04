@@ -68,6 +68,8 @@ namespace AtlasBiomeHighlighter
         public ToggleNode DebugMode { get; set; } = new(false);
         public ToggleNode DebugPreferredMaps { get; set; } = new(false);
         public ToggleNode DebugPreferredDetails { get; set; } = new(false);
+        public ToggleNode PerformanceProfiling { get; set; } = new(false);
+        public RangeNode<int> PerformanceSpikeThresholdMs { get; set; } = new(4, 1, 50);
 
     // Hide overlay on completed (green) atlas nodes
         public ToggleNode HideCompletedMaps { get; set; } = new(true);

@@ -1,16 +1,29 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
 
 namespace AtlasBiomeHighlighter
 {
     public partial class AtlasBiomeHighlighter
     {
-        // Cached per-node data rebuilt on the (throttled) ScreenRefreshMs tick.
-        private readonly List<NodeRenderInfo> _visibleNodeInfos = new(256);
+        // Cached per-node data consumed by Render().
+        private List<NodeRenderInfo> _visibleNodeInfos = new(256);
+
+        // Stage2: build visible/status caches incrementally into scratch buffers, then publish atomically.
+        // This avoids 50-90ms stalls from scanning the entire atlas in one Tick().
+        private List<AtlasNodeDescription> _visibleNodesNext = new(256);
+        private List<NodeRenderInfo> _visibleNodeInfosNext = new(256);
+        private Dictionary<(int x, int y), NodeStatus> _statusByCoordNext = new(1024);
+        private int _visibleCacheBuildIndex;
+        private int _visibleCacheBuildAtlasLength = -1;
+        private bool _visibleCacheBuildInProgress;
+        private const int VisibleCacheBuildBudgetPerTick = 96;
+        private const int VisibleCacheBuildMinItemsBeforeTimeSlice = 16;
+        private const double VisibleCacheBuildTimeBudgetMs = 2.25;
 
         // Cached flags by coordinate for graph rendering/pathfinding (connections, etc.).
-        private readonly Dictionary<(int x, int y), NodeStatus> _statusByCoord = new(1024);
+        private Dictionary<(int x, int y), NodeStatus> _statusByCoord = new(1024);
 
         private readonly struct NodeStatus
         {
@@ -39,7 +52,9 @@ namespace AtlasBiomeHighlighter
                 bool visited,
                 bool unlocked,
                 string? mapName,
-                string? uniqueName)
+                string? uniqueName,
+                string nameToken,
+                string idToken)
             {
                 Node = node;
                 Biome = biome;
@@ -52,6 +67,8 @@ namespace AtlasBiomeHighlighter
                 Unlocked = unlocked;
                 MapName = mapName;
                 UniqueName = uniqueName;
+                NameToken = nameToken;
+                IdToken = idToken;
             }
 
             public AtlasNodeDescription Node { get; }
@@ -65,66 +82,136 @@ namespace AtlasBiomeHighlighter
             public bool Unlocked { get; }
             public string? MapName { get; }
             public string? UniqueName { get; }
+            public string NameToken { get; }
+            public string IdToken { get; }
         }
 
         /// <summary>
-        /// Rebuilds visible-node caches and per-coordinate status caches.
-        /// This is called from Tick() on the ScreenRefreshMs cadence, not per-frame.
+        /// Incrementally rebuilds visible-node caches and per-coordinate status caches.
+        /// Each call processes a small fixed budget and publishes the new cache only when complete.
+        /// Render() keeps using the previous completed cache while a rebuild is in progress.
         /// </summary>
-        private void RebuildVisibleCaches()
+        /// <returns>True when the current rebuild pass has completed.</returns>
+        private bool RebuildVisibleCaches()
         {
-            _visibleNodes.Clear();
-            _visibleNodeInfos.Clear();
-            _statusByCoord.Clear();
+            if (_atlasNodes.Length == 0)
+            {
+                _visibleNodes.Clear();
+                _visibleNodeInfos.Clear();
+                _statusByCoord.Clear();
+                ResetVisibleCacheBuild();
+                return true;
+            }
 
-            // Fill coord status cache for ALL nodes (cheap enough at the throttled rate; avoids per-frame memory reads).
-            for (int i = 0; i < _atlasNodes.Length; i++)
+            if (!_visibleCacheBuildInProgress || _visibleCacheBuildAtlasLength != _atlasNodes.Length)
+            {
+                _visibleNodesNext.Clear();
+                _visibleNodeInfosNext.Clear();
+                _statusByCoordNext.Clear();
+                _visibleCacheBuildIndex = 0;
+                _visibleCacheBuildAtlasLength = _atlasNodes.Length;
+                _visibleCacheBuildInProgress = true;
+            }
+
+            // Stage8: keep the old item-budget, but also cap the wall-clock work per Tick.
+            // This smooths rare rebuild spikes without changing visible quality or drawing behavior.
+            long buildStartTimestamp = Stopwatch.GetTimestamp();
+            int processed = 0;
+            int i = _visibleCacheBuildIndex;
+
+            while (i < _atlasNodes.Length && processed < VisibleCacheBuildBudgetPerTick)
             {
                 var nd = _atlasNodes[i];
-                if (nd?.Element is null) continue;
+                i++;
+                processed++;
+
+                if (nd?.Element is null)
+                    continue;
 
                 bool unlocked = Utility.TryIsUnlocked(nd, out var uu) && uu;
                 bool visited = Utility.TryIsVisited(nd, out var vv) && vv;
                 bool completed = Utility.IsMapCompleted(nd);
 
                 var c = nd.Coordinate;
-                _statusByCoord[(c.X, c.Y)] = new NodeStatus(unlocked, visited, completed);
+                _statusByCoordNext[(c.X, c.Y)] = new NodeStatus(unlocked, visited, completed);
 
-                if (!Utility.IsInScreen(nd, BorderX, BorderY))
-                    continue;
+                if (Utility.IsInScreen(nd, BorderX, BorderY))
+                {
+                    _visibleNodesNext.Add(nd);
 
-                _visibleNodes.Add(nd);
+                    // NodeRenderInfo caches the things we otherwise would query repeatedly every Render().
+                    var biome = Utility.TryGetBiome(nd);
+                    var biomeDisplay = BiomeUtils.Display(biome);
+                    var sflags = Utility.TryGetSpecialFlags(nd);
 
-                // NodeRenderInfo caches the things we otherwise would query repeatedly every Render().
-                var biome = Utility.TryGetBiome(nd);
-                var biomeDisplay = BiomeUtils.Display(biome);
+                    bool attempted = Utility.IsMapAttempted(nd);
+                    bool locked = Utility.IsMapLocked(nd);
 
-                var sflags = Utility.TryGetSpecialFlags(nd);
+                    string? mapName = null;
+                    string nameToken = string.Empty;
+                    if (Utility.TryGetAnyMapName(nd, sflags, out var mn) && !string.IsNullOrWhiteSpace(mn))
+                    {
+                        mapName = mn;
+                        nameToken = Utility.NormalizeToken(mn);
+                    }
 
-                bool attempted = Utility.IsMapAttempted(nd);
-                bool locked = Utility.IsMapLocked(nd);
+                    string idToken = string.Empty;
+                    if (Utility.TryGetNodeId(nd, out var nodeId) && !string.IsNullOrWhiteSpace(nodeId))
+                        idToken = Utility.NormalizeToken(nodeId);
 
-                string? mapName = null;
-                if (Utility.TryGetAnyMapName(nd, out var mn) && !string.IsNullOrWhiteSpace(mn))
-                    mapName = mn;
+                    string? uniqueName = null;
+                    if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Utility.TryGetUniqueNameFromId(nd, out var un) && !string.IsNullOrWhiteSpace(un))
+                        uniqueName = un;
 
-                string? uniqueName = null;
-                if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Utility.TryGetUniqueNameFromId(nd, out var un) && !string.IsNullOrWhiteSpace(un))
-                    uniqueName = un;
+                    _visibleNodeInfosNext.Add(new NodeRenderInfo(
+                        nd,
+                        biome,
+                        biomeDisplay,
+                        sflags,
+                        completed,
+                        attempted,
+                        locked,
+                        visited,
+                        unlocked,
+                        mapName,
+                        uniqueName,
+                        nameToken,
+                        idToken));
+                }
 
-                _visibleNodeInfos.Add(new NodeRenderInfo(
-                    nd,
-                    biome,
-                    biomeDisplay,
-                    sflags,
-                    completed,
-                    attempted,
-                    locked,
-                    visited,
-                    unlocked,
-                    mapName,
-                    uniqueName));
+                if (processed >= VisibleCacheBuildMinItemsBeforeTimeSlice && (processed & 15) == 0)
+                {
+                    double elapsedMs = (Stopwatch.GetTimestamp() - buildStartTimestamp) * 1000.0 / Stopwatch.Frequency;
+                    if (elapsedMs >= VisibleCacheBuildTimeBudgetMs)
+                        break;
+                }
             }
+
+            _visibleCacheBuildIndex = i;
+            if (_visibleCacheBuildIndex < _atlasNodes.Length)
+                return false;
+
+            PublishVisibleCaches();
+            ResetVisibleCacheBuild();
+            return true;
+        }
+
+        private void PublishVisibleCaches()
+        {
+            // O(1) publish: swap buffers instead of copying hundreds/thousands of entries.
+            (_visibleNodes, _visibleNodesNext) = (_visibleNodesNext, _visibleNodes);
+            (_visibleNodeInfos, _visibleNodeInfosNext) = (_visibleNodeInfosNext, _visibleNodeInfos);
+            (_statusByCoord, _statusByCoordNext) = (_statusByCoordNext, _statusByCoord);
+        }
+
+        private void ResetVisibleCacheBuild()
+        {
+            _visibleNodesNext.Clear();
+            _visibleNodeInfosNext.Clear();
+            _statusByCoordNext.Clear();
+            _visibleCacheBuildIndex = 0;
+            _visibleCacheBuildAtlasLength = -1;
+            _visibleCacheBuildInProgress = false;
         }
 
         private bool TryGetStatus((int x, int y) coord, out bool unlocked, out bool visited, out bool completed)

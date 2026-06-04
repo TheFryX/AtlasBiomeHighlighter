@@ -21,6 +21,7 @@ namespace AtlasBiomeHighlighter
         // ===== Graph / waypoint state =====
         private readonly Dictionary<(int x, int y), AtlasNodeDescription> _nodeByCoord = new(1024);
         private readonly Dictionary<(int x, int y), List<(int x, int y)>> _neighborsByCoord = new(1024);
+        private readonly List<List<(int x, int y)>> _neighborListPool = new(1024);
 
         private readonly List<(int x, int y)> _shortestPath = new(64);
         private (int x, int y)? _selectedWaypointCoord;
@@ -28,6 +29,37 @@ namespace AtlasBiomeHighlighter
 
         // Waypoint panel atlas list UI state.
         private string _atlasSearch = string.Empty;
+
+        private const int WaypointAtlasBuildBudgetPerFrame = 32;
+
+        private readonly List<WaypointAtlasRow> _waypointAtlasRows = new(256);
+        private string _waypointAtlasCachedSearch = "\u0000";
+        private bool _waypointAtlasCachedUnlockedOnly;
+        private bool _waypointAtlasCachedHideCompleted;
+        private bool _waypointAtlasCachedHideAttempted;
+        private bool _waypointAtlasCachedHideLocked;
+        private int _waypointAtlasCachedMaxItems;
+        private int _waypointAtlasCachedNodeCount = -1;
+        private int _waypointAtlasBuildIndex;
+        private bool _waypointAtlasBuildActive;
+
+        private readonly struct WaypointAtlasRow
+        {
+            public WaypointAtlasRow(AtlasNodeDescription node, string name, string biome, int x, int y)
+            {
+                Node = node;
+                Name = name;
+                Biome = biome;
+                X = x;
+                Y = y;
+            }
+
+            public AtlasNodeDescription Node { get; }
+            public string Name { get; }
+            public string Biome { get; }
+            public int X { get; }
+            public int Y { get; }
+        }
 
         // Tower range display (toggled by hotkey; kept simple/reliable).
         private bool _towerRangeActive;
@@ -72,7 +104,7 @@ namespace AtlasBiomeHighlighter
         private void RefreshGraphCaches()
         {
             _nodeByCoord.Clear();
-            _neighborsByCoord.Clear();
+            ReleaseNeighborLists();
 
             if (_atlasPanel is null) return;
 
@@ -85,18 +117,20 @@ namespace AtlasBiomeHighlighter
                 _nodeByCoord[(c.X, c.Y)] = nd;
             }
 
-
             try
             {
-                var points = _atlasPanel.Points?.ToArray();
-                if (points == null || points.Length == 0) return;
+                var points = _atlasPanel.Points;
+                if (points == null) return;
 
                 foreach (var p in points)
                 {
                     var src = p.Source;
                     var srcKey = (src.X, src.Y);
                     if (!_neighborsByCoord.TryGetValue(srcKey, out var list))
-                        _neighborsByCoord[srcKey] = list = new List<(int, int)>(6);
+                    {
+                        list = RentNeighborList();
+                        _neighborsByCoord[srcKey] = list;
+                    }
 
                     foreach (var target in p.Targets)
                     {
@@ -110,7 +144,11 @@ namespace AtlasBiomeHighlighter
                         // drawing duplicates.
                         var targetKey = (target.X, target.Y);
                         if (!_neighborsByCoord.TryGetValue(targetKey, out var reverseList))
-                            _neighborsByCoord[targetKey] = reverseList = new List<(int, int)>(6);
+                        {
+                            reverseList = RentNeighborList();
+                            _neighborsByCoord[targetKey] = reverseList;
+                        }
+
                         AddNeighbor(reverseList, src);
                     }
                 }
@@ -119,6 +157,7 @@ namespace AtlasBiomeHighlighter
             {
                 // Points unavailable in this ExileCore build.
                 // We keep caches empty; callers will simply skip drawing connections/path.
+                ReleaseNeighborLists();
             }
 
             static void AddNeighbor(List<(int, int)> list, Vector2i v)
@@ -128,6 +167,31 @@ namespace AtlasBiomeHighlighter
                 var k = (v.X, v.Y);
                 if (!list.Contains(k)) list.Add(k);
             }
+        }
+
+        private List<(int x, int y)> RentNeighborList()
+        {
+            int last = _neighborListPool.Count - 1;
+            if (last < 0)
+                return new List<(int x, int y)>(6);
+
+            var list = _neighborListPool[last];
+            _neighborListPool.RemoveAt(last);
+            return list;
+        }
+
+        private void ReleaseNeighborLists()
+        {
+            if (_neighborsByCoord.Count == 0)
+                return;
+
+            foreach (var list in _neighborsByCoord.Values)
+            {
+                list.Clear();
+                _neighborListPool.Add(list);
+            }
+
+            _neighborsByCoord.Clear();
         }
 
         private bool TryGetCoordinate(AtlasNodeDescription nd, out Vector2i coord)

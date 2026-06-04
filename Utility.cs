@@ -64,20 +64,125 @@ namespace AtlasBiomeHighlighter
 	        }
         public static bool IsInScreen(AtlasNodeDescription node, int width, int height)
         {
-            var c = node.Element.Center;
-            return c.X > 0 && c.X < width && c.Y > 0 && c.Y < height;
+            try
+            {
+                if (node?.Element is null)
+                    return false;
+
+                var c = node.Element.Center;
+                return c.X > 0 && c.X < width && c.Y > 0 && c.Y < height;
+            }
+            catch
+            {
+                return false;
+            }
         }
+
+        private const BindingFlags InstanceAnyVisibility = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private const BindingFlags InstanceAnyVisibilityIgnoreCase = InstanceAnyVisibility | BindingFlags.IgnoreCase;
+
+        private static readonly object ReflectionCacheLock = new();
+        private static readonly Dictionary<(Type type, string name), MemberInfo?> MemberCache = new();
+        private static readonly Dictionary<Type, PropertyInfo[]> PropertyCache = new();
+        private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new();
 
         private static object? GetMember(object? obj, string name)
         {
             if (obj is null) return null;
+
             var t = obj.GetType();
-            var p = t.GetProperty(name, BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.IgnoreCase);
-            if (p != null) return p.GetValue(obj);
-            var f = t.GetField(name, BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.IgnoreCase);
-            if (f != null) return f.GetValue(obj);
-            return null;
+            var key = (t, name);
+            MemberInfo? member;
+
+            lock (ReflectionCacheLock)
+            {
+                if (!MemberCache.TryGetValue(key, out member))
+                {
+                    member = t.GetProperty(name, InstanceAnyVisibilityIgnoreCase);
+                    if (member is PropertyInfo property && property.GetIndexParameters().Length != 0)
+                        member = null;
+
+                    member ??= t.GetField(name, InstanceAnyVisibilityIgnoreCase);
+                    MemberCache[key] = member;
+                }
+            }
+
+            try
+            {
+                return member switch
+                {
+                    PropertyInfo property => property.GetValue(obj),
+                    FieldInfo field => field.GetValue(obj),
+                    _ => null
+                };
+            }
+            catch
+            {
+                return null;
+            }
         }
+
+        private static PropertyInfo[] GetCachedProperties(Type type)
+        {
+            lock (ReflectionCacheLock)
+            {
+                if (!PropertyCache.TryGetValue(type, out var properties))
+                {
+                    properties = type.GetProperties(InstanceAnyVisibility);
+                    PropertyCache[type] = properties;
+                }
+
+                return properties;
+            }
+        }
+
+        private static FieldInfo[] GetCachedFields(Type type)
+        {
+            lock (ReflectionCacheLock)
+            {
+                if (!FieldCache.TryGetValue(type, out var fields))
+                {
+                    fields = type.GetFields(InstanceAnyVisibility);
+                    FieldCache[type] = fields;
+                }
+
+                return fields;
+            }
+        }
+
+        private static bool NameContains(string value, string fragment) =>
+            value.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static bool IsInterestingSpecialMemberName(string name)
+        {
+            return NameContains(name, "TEXT") ||
+                   NameContains(name, "LABEL") ||
+                   NameContains(name, "TOOLTIP") ||
+                   NameContains(name, "STRING") ||
+                   NameContains(name, "CAPTION") ||
+                   NameContains(name, "TEXTURE") ||
+                   NameContains(name, "ICON") ||
+                   NameContains(name, "ATLASENTRY") ||
+                   name.Equals("ID", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsNameMemberName(string name)
+        {
+            if (name.Equals("TEXTURENAME", StringComparison.OrdinalIgnoreCase) ||
+                NameContains(name, "TEXTURE") ||
+                NameContains(name, "ICON"))
+                return false;
+
+            return NameContains(name, "TITLE") ||
+                   NameContains(name, "NAME") ||
+                   NameContains(name, "HEADER") ||
+                   NameContains(name, "CAPTION") ||
+                   NameContains(name, "LABELTEXT");
+        }
+
+        private static bool IsChildCollectionMemberName(string name) =>
+            name.Equals("Children", StringComparison.OrdinalIgnoreCase) ||
+            NameContains(name, "Child");
 
         private static string? ExtractString(object? v)
         {
@@ -195,21 +300,19 @@ namespace AtlasBiomeHighlighter
                     if (cur == null) continue;
                     var t = cur.GetType();
 
-                    foreach (var p in t.GetProperties(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
+                    foreach (var p in GetCachedProperties(t))
                     {
                         if (p.GetIndexParameters().Length > 0) continue;
-                        var nameU = p.Name.ToUpperInvariant();
-                        if (nameU.Contains("TEXT") || nameU.Contains("LABEL") || nameU.Contains("TOOLTIP") || nameU.Contains("STRING") || nameU.Contains("CAPTION") || nameU.Contains("TEXTURE") || nameU.Contains("ICON") || nameU.Contains("TEXTURENAME") || nameU.Contains("ATLASENTRY") || nameU == "ID")
+                        if (IsInterestingSpecialMemberName(p.Name))
                         {
                             string? val = null;
                             try { val = ExtractString(p.GetValue(cur)); } catch {}
                             ClassifyStrict(val, ref flags);
                         }
                     }
-                    foreach (var f in t.GetFields(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
+                    foreach (var f in GetCachedFields(t))
                     {
-                        var nameU = f.Name.ToUpperInvariant();
-                        if (nameU.Contains("TEXT") || nameU.Contains("LABEL") || nameU.Contains("TOOLTIP") || nameU.Contains("STRING") || nameU.Contains("CAPTION") || nameU.Contains("TEXTURE") || nameU.Contains("ICON") || nameU.Contains("TEXTURENAME") || nameU.Contains("ATLASENTRY") || nameU == "ID")
+                        if (IsInterestingSpecialMemberName(f.Name))
                         {
                             string? val = null;
                             try { val = ExtractString(f.GetValue(cur)); } catch {}
@@ -217,9 +320,9 @@ namespace AtlasBiomeHighlighter
                         }
                     }
 
-                    foreach (var p in t.GetProperties(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
+                    foreach (var p in GetCachedProperties(t))
                     {
-                        if (p.Name.Equals("Children", System.StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Child"))
+                        if (IsChildCollectionMemberName(p.Name))
                         {
                             try
                             {
@@ -240,27 +343,43 @@ namespace AtlasBiomeHighlighter
         private static void ClassifyStrict(string? s, ref SpecialFlags flags)
         {
             if (string.IsNullOrWhiteSpace(s)) return;
-            var u = s.ToUpperInvariant();
 
             // Area contains Abysses / Abyss atlas node.
             // Observed AtlasEntry.Id examples: AtlasLeagueAbyssInnerNode18_, AtlasLeagueAbyssInnerNode23.
-            if (u.Contains("ATLASLEAGUEABYSS") || u.Contains("AREA CONTAINS ABYSS") || u.Contains("AREA CONTAINS ABYSSES"))
+            if (s.Contains("ATLASLEAGUEABYSS", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("AREA CONTAINS ABYSS", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("AREA CONTAINS ABYSSES", StringComparison.OrdinalIgnoreCase))
                 flags |= SpecialFlags.AreaContainsAbyss;
 
             // Strict Deadly Map Boss markers:
             //  - TextureName ends with AtlasIconContentMapBossSpecial.dds
             //  - text contains EXACT 'DEADLY MAP BOSS'
-            if (u.Contains("ATLASICONCONTENTMAPBOSSSPECIAL")) flags |= SpecialFlags.DeadlyBoss;
-            if (u.Contains("DEADLY MAP BOSS")) flags |= SpecialFlags.DeadlyBoss;
+            if (s.Contains("ATLASICONCONTENTMAPBOSSSPECIAL", StringComparison.OrdinalIgnoreCase))
+                flags |= SpecialFlags.DeadlyBoss;
+            if (s.Contains("DEADLY MAP BOSS", StringComparison.OrdinalIgnoreCase))
+                flags |= SpecialFlags.DeadlyBoss;
 
             // Corrupted Nexus icon (per screenshot): AtlasIconContentCorruptionNexus.dds
-            if (u.Contains("ATLASICONCONTENTCORRUPTIONNEXUS") || u.Contains("ATLASICONCONTENTCORRUPTEDNEXUS")) { flags |= SpecialFlags.CorruptedNexus; flags &= ~SpecialFlags.UniqueMap; }
+            if (s.Contains("ATLASICONCONTENTCORRUPTIONNEXUS", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("ATLASICONCONTENTCORRUPTEDNEXUS", StringComparison.OrdinalIgnoreCase))
+            {
+                flags |= SpecialFlags.CorruptedNexus;
+                flags &= ~SpecialFlags.UniqueMap;
+            }
 
             // Trader (Moment of Zen / Merchant)
-            if (u.Contains("ATLASICONCONTENTTRADER")) { flags |= SpecialFlags.MomentofZen; flags &= ~SpecialFlags.UniqueMap; }
+            if (s.Contains("ATLASICONCONTENTTRADER", StringComparison.OrdinalIgnoreCase))
+            {
+                flags |= SpecialFlags.MomentofZen;
+                flags &= ~SpecialFlags.UniqueMap;
+            }
 
             // Cleansed/Sanctified area icon (per screenshot): AtlasIconContentSanctification.dds
-            if (u.Contains("ATLASICONCONTENTSANCTIFICATION")) { flags |= SpecialFlags.Cleansed; flags &= ~SpecialFlags.UniqueMap; }
+            if (s.Contains("ATLASICONCONTENTSANCTIFICATION", StringComparison.OrdinalIgnoreCase))
+            {
+                flags |= SpecialFlags.Cleansed;
+                flags &= ~SpecialFlags.UniqueMap;
+            }
         }
 
         public static bool TryGetUniqueNameFromId(AtlasNodeDescription nd, out string? display)
@@ -274,12 +393,16 @@ namespace AtlasBiomeHighlighter
 
         public static bool TryGetAnyMapName(AtlasNodeDescription nd, out string? name)
         {
+            return TryGetAnyMapName(nd, TryGetSpecialFlags(nd), out name);
+        }
+
+        public static bool TryGetAnyMapName(AtlasNodeDescription nd, SpecialFlags sflags, out string? name)
+        {
             name = null;
 
 	            // Some special atlas content nodes have no visible label text (Text/TextNoTags == null).
 	            // For Preferred maps matching we still want a stable name.
-	            var sflags = TryGetSpecialFlags(nd);
-	            if ((sflags & SpecialFlags.CorruptedNexus) != 0)
+		            if ((sflags & SpecialFlags.CorruptedNexus) != 0)
 	            {
 	                name = "Corrupted Nexus";
 	                return true;
@@ -329,54 +452,40 @@ namespace AtlasBiomeHighlighter
                 var stack = new System.Collections.Generic.Stack<object?>();
                 stack.Push(root);
 
-                bool IsNameProp(string nm)
-                {
-                    var U = nm.ToUpperInvariant();
-                    if (U == "TEXTURENAME" || U.Contains("TEXTURE") || U.Contains("ICON")) return false;
-                    return U.Contains("TITLE") || U.Contains("NAME") || U.Contains("HEADER") || U.Contains("CAPTION") || U.Contains("LABELTEXT");
-                }
-
-                string? AsString(object? v)
-                {
-                    if (v is null) return null;
-                    if (v is string s) return s;
-                    try { return v.ToString(); } catch { return null; }
-                }
-
                 while (stack.Count > 0)
                 {
                     var cur = stack.Pop();
                     if (cur == null) continue;
                     var t = cur.GetType();
 
-                    foreach (var p in t.GetProperties(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
+                    foreach (var p in GetCachedProperties(t))
                     {
                         if (p.GetIndexParameters().Length > 0) continue;
-                        if (IsNameProp(p.Name))
+                        if (IsNameMemberName(p.Name))
                         {
                             try
                             {
-                                var s = AsString(p.GetValue(cur));
+                                var s = ExtractString(p.GetValue(cur));
                                 if (!string.IsNullOrWhiteSpace(s)) { name = s.Trim(); return true; }
                             } catch {}
                         }
                     }
-                    foreach (var f in t.GetFields(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
+                    foreach (var f in GetCachedFields(t))
                     {
-                        if (IsNameProp(f.Name))
+                        if (IsNameMemberName(f.Name))
                         {
                             try
                             {
-                                var s = AsString(f.GetValue(cur));
+                                var s = ExtractString(f.GetValue(cur));
                                 if (!string.IsNullOrWhiteSpace(s)) { name = s.Trim(); return true; }
                             } catch {}
                         }
                     }
 
                     // traverse children
-                    foreach (var p in t.GetProperties(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic))
+                    foreach (var p in GetCachedProperties(t))
                     {
-                        if (p.Name.Equals("Children", System.StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Child"))
+                        if (IsChildCollectionMemberName(p.Name))
                         {
                             try
                             {
