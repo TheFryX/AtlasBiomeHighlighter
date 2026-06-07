@@ -1,12 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Text;
 
 namespace AtlasBiomeHighlighter
 {
     public partial class AtlasBiomeHighlighter
     {
+        private const string PerformanceSpikeLogFileName = "AtlasBiomeHighlighter.PerformanceSpikes.txt";
         private readonly Dictionary<string, long> _lastProfilerLogMsByName = new(StringComparer.Ordinal);
+        private readonly object _performanceSpikeLogLock = new();
 
         private IDisposable ProfileScope(string name)
         {
@@ -28,7 +33,6 @@ namespace AtlasBiomeHighlighter
             ReportProfileElapsedMs(name, elapsedMs);
         }
 
-
         private void ReportProfileElapsedMs(string name, double elapsedMs)
         {
             if (!Settings.DebugMode.Value || !Settings.PerformanceProfiling.Value)
@@ -42,7 +46,7 @@ namespace AtlasBiomeHighlighter
                 return;
 
             _lastProfilerLogMsByName[name] = now;
-            LogMessage($"[AtlasBiomeHighlighter] {name} spike: {elapsedMs:F2} ms", 3);
+            WritePerformanceSpike(name, elapsedMs);
         }
 
         private void ReportProfileElapsedTicks(string name, long elapsedTicks)
@@ -52,6 +56,47 @@ namespace AtlasBiomeHighlighter
 
             double elapsedMs = elapsedTicks * 1000.0 / Stopwatch.Frequency;
             ReportProfileElapsedMs(name, elapsedMs);
+        }
+
+        private void WritePerformanceSpike(string name, double elapsedMs)
+        {
+            try
+            {
+                var thresholdMs = Settings.PerformanceSpikeThresholdMs.Value;
+                var path = Path.Combine(DirectoryFullName, PerformanceSpikeLogFileName);
+                var line = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {name} spike: {elapsedMs:F2} ms (threshold: {thresholdMs} ms){Environment.NewLine}");
+
+                lock (_performanceSpikeLogLock)
+                    File.AppendAllText(path, line, Encoding.UTF8);
+            }
+            catch
+            {
+                
+            }
+        }
+
+        private void WritePerformanceSpikeDetails(string name, double elapsedMs, string details)
+        {
+            try
+            {
+                var thresholdMs = Settings.PerformanceSpikeThresholdMs.Value;
+                var path = Path.Combine(DirectoryFullName, PerformanceSpikeLogFileName);
+                var sb = new StringBuilder(256);
+                sb.Append('[').Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)).Append("] ");
+                sb.Append(name).Append(" spike: ").Append(elapsedMs.ToString("F2", CultureInfo.InvariantCulture));
+                sb.Append(" ms (threshold: ").Append(thresholdMs.ToString(CultureInfo.InvariantCulture)).AppendLine(" ms)");
+                if (!string.IsNullOrWhiteSpace(details))
+                    sb.AppendLine(details);
+
+                lock (_performanceSpikeLogLock)
+                    File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+                
+            }
         }
 
         private sealed class ProfileScopeImpl : IDisposable

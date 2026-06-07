@@ -13,19 +13,28 @@ namespace AtlasBiomeHighlighter
     public partial class AtlasBiomeHighlighter
     {
         private const int NodeCircleSegments = 12;
+        private const int MechanicCircleSegments = 8;
         private const int WaypointCircleSegments = 20;
+        private const float RingViewportPadding = 80f;
+        private Vector2 _currentRenderDisplaySize;
         private readonly Dictionary<string, Vector2> _labelSizeCache = new(StringComparer.Ordinal);
         private const int LabelSizeCacheMaxEntries = 2048;
 
-        // Stage6: ColorConvertFloat4ToU32 was executed for every ring/marker draw.
-        // Colors are setting-derived and repeat heavily, so cache the packed ImGui color.
+        
+        
         private readonly Dictionary<int, uint> _imguiColorCache = new(128);
         private const int ImGuiColorCacheMaxEntries = 512;
 
-        // Stage10: connection rendering is draw-call heavy and used while panning the atlas.
-        // Cache screen-space endpoints/status for the current render pass so every connection
-        // does not repeatedly query atlas elements, status dictionaries and node lookups.
+        
+        
+        
         private readonly Dictionary<(int x, int y), ConnectionRenderNode> _connectionRenderNodeCache = new(2048);
+
+        
+        
+        
+        
+        private readonly Dictionary<(int x, int y), Vector2> _shortestPathStableScreenByCoord = new(2048);
         private const float ConnectionViewportPadding = 96f;
         private const float MinConnectionLengthSquared = 4f;
         private long _lastConnectionDiagnosticLogMs;
@@ -50,10 +59,11 @@ namespace AtlasBiomeHighlighter
             if (!Settings.Enable.Value) return;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
 
-            // Ensure BorderX/BorderY reflect current window/overlay size even if settings changed.
+            
             UpdateViewportSize();
+            _currentRenderDisplaySize = ImGui.GetIO().DisplaySize;
 
-            // Map connections
+            
             try
             {
                 if (Settings.DrawMapConnections.Value)
@@ -64,7 +74,7 @@ namespace AtlasBiomeHighlighter
             }
             catch { }
 
-            // Waypoints + shortest path
+            
             try
             {
                 if (Settings.WaypointsEnabled.Value)
@@ -94,6 +104,8 @@ namespace AtlasBiomeHighlighter
             long renderNodeLabelsTicks = 0;
             long renderNodeTotalTicks = 0;
 
+            bool anyMechanicHighlightsEnabled = HasAnyMechanicHighlightEnabled();
+
             using (ProfileScope("Render node overlays"))
             {
             foreach (var info in _visibleNodeInfos)
@@ -104,19 +116,22 @@ namespace AtlasBiomeHighlighter
                 if (nd?.Element is null)
                     continue;
 
-                // User filters (cached flags; no per-frame memory reads).
+                
                 if (Settings.HideCompletedMaps.Value && info.Completed) continue;
                 if (Settings.HideAttemptedMaps.Value && info.Attempted) continue;
                 if (Settings.HideLockedMaps.Value && info.Locked) continue;
 
                 var biome = info.Biome;
 
-                // Specials bypass biome filter.
+                
                 bool biomeVisible = biome != Biome.Unknown && Settings.Visible.TryGetValue(biome, out var on) && on.Value;
                 var sflags = info.SpecialFlags;
                 bool isDeadly = (sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
 
+                var mechanicNames = info.MechanicNames;
+                bool mechanicWanted = anyMechanicHighlightsEnabled && IsAnyMechanicHighlightEnabled(mechanicNames);
                 bool specialWanted =
+                    mechanicWanted ||
                     ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
                     ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
                     ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
@@ -125,13 +140,13 @@ namespace AtlasBiomeHighlighter
                     ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value) ||
                     ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0 && Settings.HighlightAreaContainsExpedition.Value);
 
-                // Preferred maps (token matching is cache-only; no API calls).
+                
                 bool preferredWanted = false;
                 string? preferredMatchedToken = null;
                 if (Settings.HighlightPreferredMaps.Value && !isDeadly)
                 {
-                    // Stage4: tokens are built in the incremental visible-cache pass, not in Render().
-                    // Render() must only do cheap HashSet lookups.
+                    
+                    
                     if (info.NameToken.Length != 0 && _preferredTokensExact.Contains(info.NameToken))
                     {
                         preferredWanted = true;
@@ -141,6 +156,20 @@ namespace AtlasBiomeHighlighter
                     {
                         preferredWanted = true;
                         preferredMatchedToken = info.IdToken;
+                    }
+                    else if (_preferredMechanicTokensExact.Count != 0)
+                    {
+                        var mechanicTokens = info.MechanicTokens;
+                        for (int mt = 0; mt < mechanicTokens.Length; mt++)
+                        {
+                            var token = mechanicTokens[mt];
+                            if (token.Length != 0 && _preferredMechanicTokensExact.Contains(token))
+                            {
+                                preferredWanted = true;
+                                preferredMatchedToken = token;
+                                break;
+                            }
+                        }
                     }
                 }
 
@@ -153,9 +182,9 @@ namespace AtlasBiomeHighlighter
                     Settings.ShowMapNames.Value &&
                     !string.IsNullOrWhiteSpace(info.MapName);
 
-                // Biome visibility controls rings/highlights, not map-name labels.
-                // When Show map names is enabled, users expect every resolved map name to be visible
-                // even if that biome is unchecked in the Biomes section.
+                
+                
+                
                 if (!renderOverlay && !renderMapNameLabelOnly)
                     continue;
 
@@ -167,15 +196,31 @@ namespace AtlasBiomeHighlighter
                 long __ringsStart = profileRenderSections ? Stopwatch.GetTimestamp() : 0;
                 var baseColor = colorNode?.Value ?? Settings.LabelTextColor.Value;
                 var ringColor = Utility.WithOpacity(baseColor, Settings.Opacity.Value);
-                // Screen-space position changes while panning/zooming the atlas. Don't cache it; read it from the element each frame.
+                
                 var center = new Vector2(info.Node.Element.Center.X, info.Node.Element.Center.Y);
                 var radius = Settings.NodeRadius.Value;
                 var thickness = Settings.RingThickness.Value;
 
-                if (renderOverlay)
-                    DrawCircleFast(center, radius, ringColor, thickness, NodeCircleSegments);
+                
+                
+                
+                var displaySize = _currentRenderDisplaySize;
+                const float overlayPadding = 96f;
+                if (renderOverlay &&
+                    (center.X < -overlayPadding || center.Y < -overlayPadding ||
+                     center.X > displaySize.X + overlayPadding || center.Y > displaySize.Y + overlayPadding))
+                    renderOverlay = false;
 
                 int extra = 0;
+                bool nonMechanicSpecialWanted = specialWanted && !mechanicWanted;
+                bool drawBaseRing = renderOverlay && (biomeVisible || preferredWanted || nonMechanicSpecialWanted);
+
+                
+                
+                
+                if (drawBaseRing)
+                    DrawCircleFast(center, radius, ringColor, thickness, NodeCircleSegments);
+
 
                 if (renderOverlay && preferredWanted)
                 {
@@ -221,6 +266,12 @@ namespace AtlasBiomeHighlighter
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
 
+                if (renderOverlay && mechanicWanted)
+                {
+                    var c = Utility.WithOpacity(Settings.MechanicHighlightRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, MechanicCircleSegments);
+                }
+
                 if (profileRenderSections)
                     renderNodeRingsTicks += Stopwatch.GetTimestamp() - __ringsStart;
 
@@ -233,9 +284,12 @@ namespace AtlasBiomeHighlighter
 
                     if (biomeVisible && hasMapName)
                     {
-                        // When a biome is explicitly enabled, the biome label should be descriptive
-                        // regardless of the global "Show map names" toggle: "Map Name - Biome".
-                        text = $"{info.MapName} - {info.BiomeDisplay}";
+                        
+                        
+                        var mapNameText = Settings.ShowMapStatus.Value && Settings.ShowMapNames.Value
+                            ? $"{GetMapStatusPrefix(info.Completed, info.Attempted, info.Locked, info.Visited, info.Unlocked)} - {info.MapName}"
+                            : info.MapName;
+                        text = $"{mapNameText} - {info.BiomeDisplay}";
                         labelContainsMapName = true;
                     }
                     else if (Settings.PreferMapNameForDeadly.Value &&
@@ -255,9 +309,12 @@ namespace AtlasBiomeHighlighter
                     {
                         if (Settings.ShowMapNames.Value && hasMapName)
                         {
-                            // UX: when only Show map names is enabled, show every resolved map name only.
-                            // The label still uses the biome color, but does not append biome text.
-                            text = info.MapName!;
+                            
+                            
+                            var mapNameText = info.MapName!;
+                            text = Settings.ShowMapStatus.Value
+                                ? $"{GetMapStatusPrefix(info.Completed, info.Attempted, info.Locked, info.Visited, info.Unlocked)} - {mapNameText}"
+                                : mapNameText;
                             labelContainsMapName = true;
                         }
                         else
@@ -266,10 +323,10 @@ namespace AtlasBiomeHighlighter
                         }
                     }
 
-                    // Behaviour summary:
-                    // - Show map names only: "Map Name" for all visible resolved maps.
-                    // - Enabled biome: "Map Name - Biome" even if Show map names is disabled.
-                    // - Unknown/unresolved map name falls back to the biome text.
+                    
+                    
+                    
+                    
 
                     if (Settings.ShowSpecialTag.Value)
                     {
@@ -279,6 +336,11 @@ namespace AtlasBiomeHighlighter
                         if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
                         if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0) text += " [Abyss]";
                         if ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0) text += " [Expedition]";
+                        foreach (var mechanicName in mechanicNames)
+                        {
+                            if (IsMechanicHighlightEnabled(mechanicName))
+                                text += " [" + mechanicName + "]";
+                        }
                         if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
                         if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
                     }
@@ -287,10 +349,10 @@ namespace AtlasBiomeHighlighter
                     var offsetY = labelContainsMapName ? Settings.MapNameOffsetY.Value : Settings.LabelOffset.Value;
                     var pos = new Vector2(center.X - size.X / 2f, center.Y - (radius + offsetY));
 
-                    // Apply Label Settings.
+                    
                     var textColor = Settings.LabelUseBiomeColor.Value ? ringColor : Settings.LabelTextColor.Value;
 
-                    // Darken unreached nodes when showing map-name labels.
+                    
                     if (labelContainsMapName && !(info.Visited || info.Unlocked))
                     {
                         textColor = System.Drawing.Color.FromArgb(
@@ -300,9 +362,9 @@ namespace AtlasBiomeHighlighter
                             (int)(textColor.B * 0.55f));
                     }
 
-                    // Draw through the shared helper so long labels such as Preferred-map tags
-                    // are pixel-snapped before fake-bold is applied. This avoids the doubled/garbled
-                    // look caused by rendering the same long text at fractional X positions.
+                    
+                    
+                    
                     DrawTextWithLabelSettings(text, pos, textColor);
                     if (profileRenderSections)
                         renderNodeLabelsTicks += Stopwatch.GetTimestamp() - __labelsStart;
@@ -328,7 +390,7 @@ namespace AtlasBiomeHighlighter
                     RenderPreferredGuides();
                 }
             }
-            catch { /* keep overlay alive */ }
+            catch {  }
 
             try
             {
@@ -378,8 +440,8 @@ namespace AtlasBiomeHighlighter
             if (diagnostics) setupTicks = Stopwatch.GetTimestamp() - setupStart;
             long loopStart = diagnostics ? Stopwatch.GetTimestamp() : 0;
 
-            // Stage11: the expensive visible-node seed, neighbor walking and duplicate removal
-            // are done when the visible cache is published. Render only draws prepared segments.
+            
+            
             for (int i = 0; i < _visibleConnectionSegments.Count; i++)
             {
                 var segment = _visibleConnectionSegments[i];
@@ -460,9 +522,10 @@ namespace AtlasBiomeHighlighter
                 return;
 
             _lastConnectionDiagnosticLogMs = now;
-            LogMessage(
-                $"[AtlasBiomeHighlighter] Connections diagnostics: total={totalMs:F2} ms, prepared={preparedSegments}, drawn={drawnConnections}, visitedSkip={visitedSkipped}, offscreenSkip={offscreenSkipped}, tinySkip={tinySkipped}, staleSkip={staleSkipped}",
-                3);
+            WritePerformanceSpikeDetails(
+                "Connections diagnostics",
+                totalMs,
+                $"prepared={preparedSegments}, drawn={drawnConnections}, visitedSkip={visitedSkipped}, offscreenSkip={offscreenSkipped}, tinySkip={tinySkipped}, staleSkip={staleSkipped}");
         }
 
         private void RenderWaypoints()
@@ -482,7 +545,7 @@ namespace AtlasBiomeHighlighter
                 var thickness = Settings.WaypointRingThickness.Value + (wp.Selected ? 1 : 0);
                 DrawCircleFast(center, Settings.WaypointRingRadius.Value, color, thickness, WaypointCircleSegments);
 
-                // Small "flag" marker (simple and cheap) to make waypoints obvious even when zoomed out.
+                
                 var top = center + new Vector2(0, -Settings.WaypointRingRadius.Value - 6);
                 var left = top + new Vector2(-6, 12);
                 var right = top + new Vector2(6, 12);
@@ -506,31 +569,40 @@ namespace AtlasBiomeHighlighter
                 if (!_nodeByCoord.TryGetValue((wp.X, wp.Y), out var nd) || nd?.Element is null)
                     continue;
 
-                var target = new Vector2(nd.Element.Center.X, nd.Element.Center.Y);
-                var colorArrow = Color.FromArgb(wp.ColorArgb);
+                Vector2 target;
+                if (!TryGetCalibratedNavigationTargetCenter(nd, out target, allowRawOnScreen: true, forceTransformRebuild: false))
+                    target = TryGetStableNavigationTargetCenter(nd, out var stableWaypointTarget, updateAnchorFromLive: true) ? stableWaypointTarget : new Vector2(nd.Element.Center.X, nd.Element.Center.Y);
 
-                // If the waypoint is on screen, show a small label near it and continue.
+                var colorArrow = Color.FromArgb(wp.ColorArgb);
+                var debugOrigin = new Vector2(w * 0.5f, h * 0.5f);
+                bool debugOnScreen = target.X > 0 && target.X < w && target.Y > 0 && target.Y < h;
+                if (!debugOnScreen || IsNavigationTargetSuspicious(target))
+                    AppendNavigationDebug("WaypointArrow", nd, debugOrigin, target, debugOnScreen ? "suspicious on-screen waypoint target" : $"off-screen waypoint target wp={wp.Name} coord={wp.X},{wp.Y}");
+
+                
                 if (target.X > 0 && target.X < w && target.Y > 0 && target.Y < h)
                 {
-                    // De-clutter: if the main overlay would already draw the map-name label for this node,
-                    // do not draw a second (identical) waypoint label on top of it.
-                    // Important: when biomes are disabled, the main overlay may NOT render the node at all.
-                    // In that case, we still want a label for the selected waypoint.
-                    if (WouldMainOverlayRenderMapNameLabel(nd))
-                        continue;
-
-                    // If the main overlay is not drawing a map-name label for this node (e.g. biomes disabled),
-                    // draw waypoint labels for any waypoints that have labels enabled.
+                    
+                    
+                    
+                    
                     if (!wp.ShowLabel)
                         continue;
 
-                    // Use the same styling as the main overlay "Label settings".
-                    // Display the map name above the node (consistent with "Show map names" labels).
-                    var label = nd.Element.Area?.Name;
-                    if (string.IsNullOrWhiteSpace(label) && Utility.TryGetAnyMapName(nd, out var nm))
-                        label = nm;
+                    var mapLabel = nd.Element.Area?.Name;
+                    if (string.IsNullOrWhiteSpace(mapLabel) && Utility.TryGetAnyMapName(nd, out var nm))
+                        mapLabel = nm;
+
+                    var waypointLabel = wp.Name?.Trim();
+                    var hasCustomWaypointLabel = !string.IsNullOrWhiteSpace(waypointLabel) &&
+                        !string.Equals(waypointLabel, mapLabel, StringComparison.OrdinalIgnoreCase);
+
+                    if (!hasCustomWaypointLabel && WouldMainOverlayRenderMapNameLabel(nd))
+                        continue;
+
+                    var label = hasCustomWaypointLabel ? waypointLabel : mapLabel;
                     if (string.IsNullOrWhiteSpace(label))
-                        label = wp.Name;
+                        label = waypointLabel;
 
                     if (!string.IsNullOrWhiteSpace(label))
                     {
@@ -545,7 +617,7 @@ namespace AtlasBiomeHighlighter
                     continue;
                 }
 
-                // Draw an arrow clamped to the screen edges pointing toward the waypoint.
+                
                 var centerScreen = new Vector2(w * 0.5f, h * 0.5f);
                 var dir = target - centerScreen;
                 if (dir.LengthSquared() < 0.001f) continue;
@@ -556,7 +628,7 @@ namespace AtlasBiomeHighlighter
                     Clamp(centerScreen.X + dir.X * 99999f, margin, w - margin),
                     Clamp(centerScreen.Y + dir.Y * 99999f, margin, h - margin));
 
-                // Better clamp: intersect ray with rectangle.
+                
                 float t = float.PositiveInfinity;
                 if (Math.Abs(dir.X) > 1e-5f)
                 {
@@ -593,8 +665,8 @@ namespace AtlasBiomeHighlighter
 
         private static void DrawTriangleFilled(Vector2 p1, Vector2 p2, Vector2 p3, Color color)
         {
-            // ExileCore2 Graphics doesn't expose filled triangle helpers in all builds.
-            // Use ImGui foreground draw list for a cheap filled triangle.
+            
+            
             var dl = ImGui.GetForegroundDrawList();
             var col = ToImGuiColor(color);
             dl.AddTriangleFilled(p1, p2, p3, col);
@@ -607,14 +679,55 @@ namespace AtlasBiomeHighlighter
 
         private void DrawCircleFast(Vector2 center, float radius, Color color, float thickness, int segments)
         {
-            // Stage5/6: ImGui draw-list circles are cheaper than Graphics.DrawCircle for large atlas overlays.
-            // Keep segment count modest; the atlas node radius is small, so 12-20 segments is visually stable.
-            // Stage6 additionally caches packed color conversion; ring rendering can call this many times per frame.
+            
+            
+            
+            
+            
             if (radius <= 0f || thickness <= 0f || color.A <= 0)
                 return;
 
+            var displaySize = _currentRenderDisplaySize;
+            if (displaySize.X <= 0f || displaySize.Y <= 0f)
+                displaySize = ImGui.GetIO().DisplaySize;
+
+            var pad = radius + RingViewportPadding;
+            if (center.X < -pad || center.Y < -pad || center.X > displaySize.X + pad || center.Y > displaySize.Y + pad)
+                return;
+
+            if (Settings.FastRingRendering.Value)
+                segments = GetAdaptiveRingSegments(radius, thickness, segments);
+
+            if (segments < 5)
+                segments = 5;
+
             var dl = ImGui.GetForegroundDrawList();
             dl.AddCircle(center, radius, GetCachedImGuiColor(color), segments, thickness);
+        }
+
+        private int GetAdaptiveRingSegments(float radius, float thickness, int requestedSegments)
+        {
+            
+            
+            
+            int maxSegments = Settings.FastRingMaxSegments.Value;
+            if (maxSegments < 5) maxSegments = 5;
+            if (maxSegments > 32) maxSegments = 32;
+
+            int adaptive;
+            if (radius <= 14f) adaptive = 5;
+            else if (radius <= 22f) adaptive = 6;
+            else if (radius <= 30f) adaptive = 7;
+            else if (radius <= 42f) adaptive = 8;
+            else adaptive = 10;
+
+            if (thickness >= 5f && adaptive > 8)
+                adaptive = 8;
+
+            int result = requestedSegments;
+            if (result > adaptive) result = adaptive;
+            if (result > maxSegments) result = maxSegments;
+            return result;
         }
 
         private uint GetCachedImGuiColor(Color color)
@@ -649,8 +762,8 @@ namespace AtlasBiomeHighlighter
 
         private void DrawCenteredLabelWithSettings(string text, Vector2 center, float radius, int offsetY, Color textColor)
         {
-            // Match the main overlay label look: centered, outlined, optional bold.
-            // Note: Graphics.MeasureText is available across ExileCore2 builds, but font size is controlled by the game/UI.
+            
+            
             var size = MeasureTextCached(text);
             var pos = new Vector2(center.X - size.X / 2f, center.Y - (radius + offsetY));
             DrawTextWithLabelSettings(text, pos, textColor);
@@ -663,15 +776,15 @@ namespace AtlasBiomeHighlighter
 
         private void DrawTextWithLabelSettings(string text, Vector2 pos, Color textColor)
         {
-            // Graphics.DrawText does not like fake-bold on long fractional-position strings.
-            // Snapping keeps labels stable when Preferred tags make the text much wider.
+            
+            
             pos = SnapTextPos(pos);
 
             if (Settings.LabelOutline.Value)
             {
-                // Stage5: the old square outline rendered (2t+1)^2-1 shadow draws per label.
-                // With the default thickness 2 that was 24 extra DrawText calls per label.
-                // A radial 8-direction outline keeps readability while cutting thick outlines by ~3x.
+                
+                
+                
                 int t = Math.Max(1, Settings.LabelOutlineThickness.Value);
                 for (int d = 1; d <= t; d++)
                 {
@@ -688,8 +801,8 @@ namespace AtlasBiomeHighlighter
 
             if (Settings.LabelBold.Value)
             {
-                // Vertical fake-bold is less destructive for ExileCore's atlas font than drawing
-                // the same long text at X+1, which can split thin glyphs apart.
+                
+                
                 Graphics.DrawText(text, new Vector2(pos.X, pos.Y + 1), textColor);
             }
 
@@ -698,43 +811,164 @@ namespace AtlasBiomeHighlighter
 
         private void RenderShortestPath()
         {
-            if (_shortestPath.Count < 2) return;
+            if (_shortestPaths.Count == 0) return;
+
             var color = Settings.ShortestPathColor.Value;
             int thickness = Settings.ShortestPathThickness.Value;
+            var io = ImGui.GetIO();
+            float viewportDiagonal = MathF.Sqrt(io.DisplaySize.X * io.DisplaySize.X + io.DisplaySize.Y * io.DisplaySize.Y);
 
-            Vector2 prevPos = default;
-            bool hasPrev = false;
+            
+            
+            
+            float maxSegmentLength = MathF.Max(520f, viewportDiagonal * 0.42f);
+            float maxSegmentLengthSq = maxSegmentLength * maxSegmentLength;
+            float maxSaneCoordinate = MathF.Max(io.DisplaySize.X, io.DisplaySize.Y) * 3.0f;
 
-            for (int i = 0; i < _shortestPath.Count; i++)
+            for (int pathIndex = 0; pathIndex < _shortestPaths.Count; pathIndex++)
             {
-                if (!_nodeByCoord.TryGetValue(_shortestPath[i], out var nd) || nd?.Element is null) { hasPrev = false; continue; }
-                var pos = new Vector2(nd.Element.Center.X, nd.Element.Center.Y);
-                if (hasPrev)
-                    Graphics.DrawLine(prevPos, pos, thickness, color);
-                prevPos = pos;
-                hasPrev = true;
-            }
+                var path = _shortestPaths[pathIndex];
+                if (path.Count < 2)
+                    continue;
 
-            // Step label near target.
-            var last = _shortestPath[^1];
-            if (_nodeByCoord.TryGetValue(last, out var lastNd) && lastNd?.Element is not null)
-            {
-                var p = new Vector2(lastNd.Element.Center.X, lastNd.Element.Center.Y);
-                var label = $"{_shortestPath.Count - 1} steps";
-                Graphics.DrawText(label, p + new Vector2(10, 10), color);
+                Vector2 prevPos = default;
+                (int x, int y) prevCoord = default;
+                bool hasPrev = false;
+
+                for (int i = 0; i < path.Count; i++)
+                {
+                    var coord = path[i];
+                    if (!TryGetShortestPathScreenPosition(coord, maxSaneCoordinate, out var pos))
+                    {
+                        hasPrev = false;
+                        continue;
+                    }
+
+                    if (hasPrev)
+                    {
+                        Vector2 drawFrom = prevPos;
+                        Vector2 drawTo = pos;
+                        float distanceSq = Vector2.DistanceSquared(drawFrom, drawTo);
+
+                        
+                        
+                        
+                        if (distanceSq > maxSegmentLengthSq)
+                        {
+                            if (_shortestPathStableScreenByCoord.TryGetValue(prevCoord, out var stableFrom))
+                            {
+                                float stableDistSq = Vector2.DistanceSquared(stableFrom, drawTo);
+                                if (stableDistSq <= maxSegmentLengthSq)
+                                {
+                                    drawFrom = stableFrom;
+                                    distanceSq = stableDistSq;
+                                }
+                            }
+                        }
+
+                        if (distanceSq > maxSegmentLengthSq && _shortestPathStableScreenByCoord.TryGetValue(coord, out var stableTo))
+                        {
+                            float stableDistSq = Vector2.DistanceSquared(drawFrom, stableTo);
+                            if (stableDistSq <= maxSegmentLengthSq)
+                            {
+                                drawTo = stableTo;
+                                distanceSq = stableDistSq;
+                            }
+                        }
+
+                        if (distanceSq <= maxSegmentLengthSq && distanceSq > MinConnectionLengthSquared)
+                        {
+                            Graphics.DrawLine(drawFrom, drawTo, thickness, color);
+                            _shortestPathStableScreenByCoord[prevCoord] = drawFrom;
+                            _shortestPathStableScreenByCoord[coord] = drawTo;
+                        }
+                    }
+
+                    prevPos = pos;
+                    prevCoord = coord;
+                    hasPrev = true;
+                }
+
+                
+                
+                var last = path[^1];
+                if (TryGetShortestPathScreenPosition(last, maxSaneCoordinate, out var p))
+                {
+                    var label = $"{path.Count - 1} steps";
+                    var textSize = ImGui.CalcTextSize(label);
+                    
+                    
+                    
+                    
+                    var ringRadius = Settings.WaypointRingRadius.Value;
+                    var yOffset = ringRadius + 4f;
+                    if (yOffset < 20f) yOffset = 20f;
+                    else if (yOffset > 34f) yOffset = 34f;
+                    var labelPos = new Vector2(p.X - textSize.X * 0.5f, p.Y + yOffset);
+                    Graphics.DrawText(label, labelPos, color);
+                }
             }
         }
 
-        /// <summary>
-        /// Returns true if the main biome overlay loop would render the map-name label for this node.
-        /// This is used to avoid double-rendering text when waypoints are enabled.
-        /// </summary>
+        private bool TryGetShortestPathScreenPosition((int x, int y) coord, float maxSaneCoordinate, out Vector2 pos)
+        {
+            pos = default;
+
+            if (!_nodeByCoord.TryGetValue(coord, out var nd) || nd?.Element is null)
+            {
+                
+                
+                
+                return _shortestPathStableScreenByCoord.TryGetValue(coord, out pos);
+            }
+
+            pos = new Vector2(nd.Element.Center.X, nd.Element.Center.Y);
+            if (!IsSaneShortestPathPosition(pos, maxSaneCoordinate))
+            {
+                return _shortestPathStableScreenByCoord.TryGetValue(coord, out pos);
+            }
+
+            
+            
+            _shortestPathStableScreenByCoord[coord] = pos;
+            return true;
+        }
+
+        private static bool IsSaneShortestPathPosition(Vector2 pos, float maxSaneCoordinate)
+        {
+            if (float.IsNaN(pos.X) || float.IsNaN(pos.Y) || float.IsInfinity(pos.X) || float.IsInfinity(pos.Y))
+                return false;
+
+            return MathF.Abs(pos.X) <= maxSaneCoordinate && MathF.Abs(pos.Y) <= maxSaneCoordinate;
+        }
+
+        private string GetMapStatusPrefix(bool completed, bool attempted, bool locked, bool visited, bool unlocked)
+        {
+            if (locked)
+                return "Locked";
+
+            if (completed)
+                return "Completed";
+
+            if (attempted)
+                return "Attempted";
+
+            if (unlocked || visited)
+                return "Runnable";
+
+            return "Locked";
+        }
+
+        
+        
+        
+        
         private bool WouldMainOverlayRenderMapNameLabel(AtlasNodeDescription nd)
         {
             if (!(Settings.ShowLabels.Value && Settings.ShowMapNames.Value))
                 return false;
 
-            // Mirror the same visibility gating as the main overlay loop.
+            
             if (Settings.HideCompletedMaps.Value && Utility.IsMapCompleted(nd))
                 return false;
             if (Settings.HideAttemptedMaps.Value && Utility.IsMapAttempted(nd))
@@ -744,11 +978,12 @@ namespace AtlasBiomeHighlighter
 
             var biome = Utility.TryGetBiome(nd);
 
-            // Specials bypass biome filter
+            
             bool biomeVisible = biome != Biome.Unknown && Settings.Visible.TryGetValue(biome, out var on) && on.Value;
             var sflags = Utility.TryGetSpecialFlags(nd);
             bool isDeadly = (sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
             bool specialWanted =
+                (HasAnyMechanicHighlightEnabled() && IsAnyMechanicHighlightEnabled(Utility.TryGetMechanicNames(nd))) ||
                 ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
                 ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
                 ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
@@ -760,22 +995,55 @@ namespace AtlasBiomeHighlighter
             bool preferredWanted = false;
             if (Settings.HighlightPreferredMaps.Value && !isDeadly && TryGetCachedNodeTokens(nd, out var nameToken, out var idToken))
             {
-                // Exact-only matching prevents short map names from matching longer ones.
+                
                 preferredWanted =
                     (nameToken.Length != 0 && _preferredTokensExact.Contains(nameToken)) ||
                     (idToken.Length != 0 && _preferredTokensExact.Contains(idToken));
             }
 
-            // Biome visibility controls rings/highlights, not map-name labels.
-            // The main overlay now renders resolved map names even when the biome is unchecked.
+            
+            
             if (Utility.TryGetAnyMapName(nd, sflags, out var mapName) && !string.IsNullOrWhiteSpace(mapName))
                 return true;
 
             if (!biomeVisible && !(specialWanted || preferredWanted))
                 return false;
 
-            // Highlight overlays still require a biome color entry to proceed.
+            
             return Settings.Colors.ContainsKey(biome);
+        }
+
+        private bool HasAnyMechanicHighlightEnabled()
+        {
+            if (Settings.MechanicHighlights == null || Settings.MechanicHighlights.Count == 0)
+                return false;
+
+            foreach (var kvp in Settings.MechanicHighlights)
+            {
+                if (kvp.Value != null && kvp.Value.Value)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool IsMechanicHighlightEnabled(string name)
+        {
+            return Settings.MechanicHighlights != null && Settings.MechanicHighlights.TryGetValue(name, out var node) && node.Value;
+        }
+
+        private bool IsAnyMechanicHighlightEnabled(IReadOnlyList<string> names)
+        {
+            if (names == null || names.Count == 0)
+                return false;
+
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (IsMechanicHighlightEnabled(names[i]))
+                    return true;
+            }
+
+            return false;
         }
 
         private void RenderTowerRange()
@@ -789,9 +1057,9 @@ namespace AtlasBiomeHighlighter
             if (!Settings.DrawTowerRange.Value) return;
             var originPos = new Vector2(originNd.Element.Center.X, originNd.Element.Center.Y);
 
-            // Behavior:
-            // - If origin is a tower: show maps in its reach.
-            // - If origin is a map: show towers that can reach it.
+            
+            
+            
             bool originIsTower = IsTower(originNd.Element);
 
 
@@ -805,7 +1073,7 @@ namespace AtlasBiomeHighlighter
                 if (nd?.Element is null) continue;
                 if (!TryGetCoordinate(nd, out var c)) continue;
 
-                // Skip origin.
+                
                 if (c.X == origin.X && c.Y == origin.Y) continue;
 
                 if (Distance(origin, c) > range) continue;
@@ -813,8 +1081,8 @@ namespace AtlasBiomeHighlighter
                 bool isTower = IsTower(nd.Element);
                 if (originIsTower)
                 {
-                    if (isTower) continue; // tower -> show maps only
-                    // Skip the tower's own node name variants.
+                    if (isTower) continue; 
+                    
                     if (nd.Element.Area?.Name?.Equals("Lost Towers", StringComparison.OrdinalIgnoreCase) == true)
                         continue;
 
@@ -822,7 +1090,7 @@ namespace AtlasBiomeHighlighter
                 }
                 else
                 {
-                    if (!isTower) continue; // map -> show towers only
+                    if (!isTower) continue; 
 
                     if (nd.Element.IsVisited) continue;
                 }
@@ -852,6 +1120,20 @@ namespace AtlasBiomeHighlighter
             _waypointAtlasCachedNodeCount = _atlasNodes?.Length ?? 0;
         }
 
+        private void InvalidateWaypointMechanicCache()
+        {
+            _waypointMechanicRows.Clear();
+            _waypointMechanicBuildIndex = 0;
+            _waypointMechanicBuildActive = true;
+            _waypointMechanicCachedSearch = Utility.NormalizeToken(_mechanicSearch);
+            _waypointMechanicCachedUnlockedOnly = Settings.WaypointAtlasUnlockedOnly.Value;
+            _waypointMechanicCachedHideCompleted = Settings.HideCompletedMaps.Value;
+            _waypointMechanicCachedHideAttempted = Settings.HideAttemptedMaps.Value;
+            _waypointMechanicCachedHideLocked = Settings.HideLockedMaps.Value;
+            _waypointMechanicCachedMaxItems = Settings.WaypointAtlasMaxItems.Value;
+            _waypointMechanicCachedNodeCount = _atlasNodes?.Length ?? 0;
+        }
+
         private void EnsureWaypointAtlasCacheCurrent()
         {
             var search = Utility.NormalizeToken(_atlasSearch);
@@ -878,6 +1160,35 @@ namespace AtlasBiomeHighlighter
                 _waypointAtlasCachedNodeCount != nodeCount)
             {
                 InvalidateWaypointAtlasCache();
+            }
+        }
+
+        private void EnsureWaypointMechanicCacheCurrent()
+        {
+            var search = Utility.NormalizeToken(_mechanicSearch);
+            var nodeCount = _atlasNodes?.Length ?? 0;
+
+            if (!_waypointMechanicBuildActive &&
+                _waypointMechanicCachedSearch == search &&
+                _waypointMechanicCachedUnlockedOnly == Settings.WaypointAtlasUnlockedOnly.Value &&
+                _waypointMechanicCachedHideCompleted == Settings.HideCompletedMaps.Value &&
+                _waypointMechanicCachedHideAttempted == Settings.HideAttemptedMaps.Value &&
+                _waypointMechanicCachedHideLocked == Settings.HideLockedMaps.Value &&
+                _waypointMechanicCachedMaxItems == Settings.WaypointAtlasMaxItems.Value &&
+                _waypointMechanicCachedNodeCount == nodeCount)
+            {
+                return;
+            }
+
+            if (_waypointMechanicCachedSearch != search ||
+                _waypointMechanicCachedUnlockedOnly != Settings.WaypointAtlasUnlockedOnly.Value ||
+                _waypointMechanicCachedHideCompleted != Settings.HideCompletedMaps.Value ||
+                _waypointMechanicCachedHideAttempted != Settings.HideAttemptedMaps.Value ||
+                _waypointMechanicCachedHideLocked != Settings.HideLockedMaps.Value ||
+                _waypointMechanicCachedMaxItems != Settings.WaypointAtlasMaxItems.Value ||
+                _waypointMechanicCachedNodeCount != nodeCount)
+            {
+                InvalidateWaypointMechanicCache();
             }
         }
 
@@ -931,48 +1242,132 @@ namespace AtlasBiomeHighlighter
                 _waypointAtlasBuildActive = false;
         }
 
+        private void ProcessWaypointMechanicCacheBudget()
+        {
+            EnsureWaypointMechanicCacheCurrent();
+
+            if (!_waypointMechanicBuildActive || _atlasNodes == null)
+                return;
+
+            using var waypointMechanicBuildProfile = ProfileScope("Build waypoint mechanic search cache");
+
+            var maxItems = Settings.WaypointAtlasMaxItems.Value;
+            var searchTok = _waypointMechanicCachedSearch;
+            int processed = 0;
+
+            while (_waypointMechanicBuildIndex < _atlasNodes.Length &&
+                   processed < WaypointAtlasBuildBudgetPerFrame &&
+                   _waypointMechanicRows.Count < maxItems)
+            {
+                var nd = _atlasNodes[_waypointMechanicBuildIndex++];
+                processed++;
+
+                if (nd?.Element is null) continue;
+                if (IsTower(nd.Element)) continue;
+
+                if (_waypointMechanicCachedHideCompleted && Utility.IsMapCompleted(nd))
+                    continue;
+                if (_waypointMechanicCachedHideAttempted && Utility.IsMapAttempted(nd))
+                    continue;
+                if (_waypointMechanicCachedHideLocked && Utility.IsMapLocked(nd))
+                    continue;
+                if (_waypointMechanicCachedUnlockedOnly && !(Utility.TryIsUnlocked(nd, out var un) && un))
+                    continue;
+
+                var mechanicNames = Utility.TryGetMechanicNames(nd);
+                if (mechanicNames.Count == 0)
+                    continue;
+
+                if (!Utility.TryGetAnyMapName(nd, out var mapName) || string.IsNullOrWhiteSpace(mapName))
+                    mapName = $"Atlas node {nd.Coordinate.X},{nd.Coordinate.Y}";
+
+                var mechanicText = string.Join(", ", mechanicNames);
+
+                if (searchTok.Length != 0)
+                {
+                    var mapTok = Utility.NormalizeToken(mapName);
+                    var mechanicTok = Utility.NormalizeToken(mechanicText);
+                    if (!mapTok.Contains(searchTok, StringComparison.Ordinal) &&
+                        !mechanicTok.Contains(searchTok, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                }
+
+                var coord = nd.Coordinate;
+                _waypointMechanicRows.Add(new WaypointMechanicRow(nd, mapName, mechanicText, Utility.TryGetBiome(nd).ToString(), coord.X, coord.Y));
+            }
+
+            if (_waypointMechanicBuildIndex >= _atlasNodes.Length || _waypointMechanicRows.Count >= maxItems)
+                _waypointMechanicBuildActive = false;
+        }
+
         private void RenderWaypointPanel()
         {
 
             if (!_waypointPanelOpen) return;
             if (!Settings.WaypointsEnabled.Value) return;
 
-            // Allow user resizing; keep a sensible initial size.
-            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(780, 520), ImGuiNET.ImGuiCond.FirstUseEver);
+            
+            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(860, 560), ImGuiNET.ImGuiCond.FirstUseEver);
             ImGuiNET.ImGui.SetNextWindowSizeConstraints(new Vector2(540, 320), new Vector2(float.MaxValue, float.MaxValue));
 
             var flags = ImGuiNET.ImGuiWindowFlags.None;
-            if (!ImGuiNET.ImGui.Begin("Atlas Waypoints", ref _waypointPanelOpen, flags))
+            if (!ImGuiNET.ImGui.Begin("Atlas Navigator", ref _waypointPanelOpen, flags))
             {
                 ImGuiNET.ImGui.End();
                 return;
             }
 
-            ImGuiNET.ImGui.TextDisabled("Hotkeys: Insert add, Delete remove, End toggle window");
+            ImGuiNET.ImGui.TextDisabled("Hotkeys: Insert = add waypoint, Delete = remove hovered waypoint, End = toggle this window");
             bool showWp = Settings.ShowWaypointsOnAtlas.Value;
-            if (ImGuiNET.ImGui.Checkbox("Show Waypoints on Atlas", ref showWp))
+            if (ImGuiNET.ImGui.Checkbox("Show Waypoints", ref showWp))
                 Settings.ShowWaypointsOnAtlas.Value = showWp;
             ImGuiNET.ImGui.SameLine();
             bool showArr = Settings.ShowWaypointArrowsOnAtlas.Value;
-            if (ImGuiNET.ImGui.Checkbox("Show Waypoint Arrows on Atlas", ref showArr))
+            if (ImGuiNET.ImGui.Checkbox("Show Direction Arrows", ref showArr))
                 Settings.ShowWaypointArrowsOnAtlas.Value = showArr;
+
+            bool atlasJumpEnabled = Settings.WaypointJumpEnabled.Value;
+            if (ImGuiNET.ImGui.Checkbox("Enable Atlas Jump", ref atlasJumpEnabled))
+                Settings.WaypointJumpEnabled.Value = atlasJumpEnabled;
+            if (ImGuiNET.ImGui.IsItemHovered())
+                ImGuiNET.ImGui.SetTooltip("Enables Jump buttons that pan the atlas to the selected map without moving the mouse.");
+
+            ImGuiNET.ImGui.SameLine();
+            bool drawShortestPath = Settings.DrawShortestPath.Value;
+            if (ImGuiNET.ImGui.Checkbox("Draw shortest path to selected waypoint", ref drawShortestPath))
+                Settings.DrawShortestPath.Value = drawShortestPath;
+            if (ImGuiNET.ImGui.IsItemHovered())
+                ImGuiNET.ImGui.SetTooltip("Draws the calculated route from the current atlas position to the selected waypoint.");
+
+            ImGuiNET.ImGui.SameLine();
+            DrawColorEdit("Shortest path color##navigator", Settings.ShortestPathColor.Value, c => Settings.ShortestPathColor.Value = c, false);
+
+            ImGuiNET.ImGui.SameLine();
+            bool advancedMode = _waypointPanelAdvancedMode;
+            if (ImGuiNET.ImGui.Checkbox("Advanced", ref advancedMode))
+                _waypointPanelAdvancedMode = advancedMode;
+            if (ImGuiNET.ImGui.IsItemHovered())
+                ImGuiNET.ImGui.SetTooltip("Shows technical coordinates for debugging. Hidden by default for a cleaner UI.");
             ImGuiNET.ImGui.Spacing();
 
             var wps = Settings.Waypoints;
 
-            // Top actions.
-            if (ImGuiNET.ImGui.Button("Clear All"))
+            
+            if (ImGuiNET.ImGui.Button("Clear All Waypoints"))
             {
                 wps.Clear();
                 _selectedWaypointCoord = null;
                 _shortestPath.Clear();
+                _shortestPaths.Clear();
             }
             ImGuiNET.ImGui.SameLine();
             ImGuiNET.ImGui.TextDisabled($"Count: {wps.Count}");
 
             ImGuiNET.ImGui.Separator();
 
-            // Waypoints list (top). Stretch with window, scroll when needed.
+            
             var wpsTableFlags =
                 ImGuiNET.ImGuiTableFlags.RowBg |
                 ImGuiNET.ImGuiTableFlags.BordersInnerH |
@@ -980,20 +1375,22 @@ namespace AtlasBiomeHighlighter
                 ImGuiNET.ImGuiTableFlags.SizingStretchProp |
                 ImGuiNET.ImGuiTableFlags.Resizable;
 
-            // Keep this list compact but responsive to window size.
+            
             var wpsAvail = ImGuiNET.ImGui.GetContentRegionAvail();
             var wpsTableH = Math.Min(Math.Max(140f, ImGuiNET.ImGui.GetTextLineHeightWithSpacing() * 10f), Math.Max(160f, wpsAvail.Y * 0.35f));
 
-            if (ImGuiNET.ImGui.BeginTable("##wps", 7, wpsTableFlags, new Vector2(0, wpsTableH)))
+            int waypointColumnCount = _waypointPanelAdvancedMode ? 7 : 6;
+            if (ImGuiNET.ImGui.BeginTable("##wps", waypointColumnCount, wpsTableFlags, new Vector2(0, wpsTableH)))
             {
                 using var waypointListProfile = ProfileScope("Render waypoint panel saved list");
-                ImGuiNET.ImGui.TableSetupColumn("Sel", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 28);
-                ImGuiNET.ImGui.TableSetupColumn("Lbl", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 28);
-                ImGuiNET.ImGui.TableSetupColumn("Color", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 44);
-                ImGuiNET.ImGui.TableSetupColumn("Name", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
-                ImGuiNET.ImGui.TableSetupColumn("Coord", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 80);
-                ImGuiNET.ImGui.TableSetupColumn("Towers", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 55);
-                ImGuiNET.ImGui.TableSetupColumn("Del", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 35);
+                ImGuiNET.ImGui.TableSetupColumn("Route", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 54);
+                ImGuiNET.ImGui.TableSetupColumn("Label", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 54);
+                ImGuiNET.ImGui.TableSetupColumn("Marker", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 54);
+                ImGuiNET.ImGui.TableSetupColumn("Map", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
+                if (_waypointPanelAdvancedMode)
+                    ImGuiNET.ImGui.TableSetupColumn("Coord", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 80);
+                ImGuiNET.ImGui.TableSetupColumn("Jump", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
+                ImGuiNET.ImGui.TableSetupColumn("Remove", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 62);
                 ImGuiNET.ImGui.TableHeadersRow();
 
                 for (int i = 0; i < wps.Count; i++)
@@ -1002,31 +1399,34 @@ namespace AtlasBiomeHighlighter
                     ImGuiNET.ImGui.PushID(i);
                     ImGuiNET.ImGui.TableNextRow();
 
-                    // Selected
+                    
                     ImGuiNET.ImGui.TableNextColumn();
                     bool selected = wp.Selected;
-                    if (ImGuiNET.ImGui.RadioButton("##sel", selected))
+                    if (ImGuiNET.ImGui.Checkbox("##route", ref selected))
                     {
-                        for (int j = 0; j < wps.Count; j++) wps[j].Selected = false;
-                        wp.Selected = true;
+                        wp.Selected = selected;
                         wps[i] = wp;
-                        _selectedWaypointCoord = (wp.X, wp.Y);
+                        SyncSelectedWaypoint();
                     }
+                    if (ImGuiNET.ImGui.IsItemHovered())
+                        ImGuiNET.ImGui.SetTooltip("Route: include this waypoint in the shortest-path routing. Multiple waypoints can be selected.");
 
-                    // Label
+                    
                     ImGuiNET.ImGui.TableNextColumn();
                     bool showLabel = wp.ShowLabel;
-                    if (ImGuiNET.ImGui.Checkbox("##lbl", ref showLabel))
+                    if (ImGuiNET.ImGui.Checkbox("##label", ref showLabel))
                     {
                         wp.ShowLabel = showLabel;
                         wps[i] = wp;
                     }
+                    if (ImGuiNET.ImGui.IsItemHovered())
+                        ImGuiNET.ImGui.SetTooltip("Label: show this map name directly on the Atlas.");
 
-                    // Color
+                    
                     ImGuiNET.ImGui.TableNextColumn();
                     var c = System.Drawing.Color.FromArgb(wp.ColorArgb);
                     var vec = new Vector4(c.R / 255f, c.G / 255f, c.B / 255f, 1f);
-                    // Square-only picker.
+                    
                     ImGuiNET.ImGui.SetNextItemWidth(ImGuiNET.ImGui.GetFrameHeight());
                     if (ImGuiNET.ImGui.ColorEdit4("##c", ref vec, ImGuiNET.ImGuiColorEditFlags.NoInputs | ImGuiNET.ImGuiColorEditFlags.NoLabel))
                     {
@@ -1035,27 +1435,36 @@ namespace AtlasBiomeHighlighter
                         wps[i] = wp;
                     }
 
-                    // Name
+                    
                     ImGuiNET.ImGui.TableNextColumn();
                     var name = wp.Name ?? string.Empty;
                     ImGuiNET.ImGui.SetNextItemWidth(-1);
-                    if (ImGuiNET.ImGui.InputText("##name", ref name, 64))
+                    if (ImGuiNET.ImGui.InputText($"##name_{i}", ref name, 64))
                     {
                         wp.Name = name;
                         wps[i] = wp;
                     }
 
-                    // Coord
-                    ImGuiNET.ImGui.TableNextColumn();
-                    ImGuiNET.ImGui.Text($"{wp.X},{wp.Y}");
+                    
+                    if (_waypointPanelAdvancedMode)
+                    {
+                        ImGuiNET.ImGui.TableNextColumn();
+                        ImGuiNET.ImGui.Text($"{wp.X},{wp.Y}");
+                    }
 
-                    // Towers
+                    
                     ImGuiNET.ImGui.TableNextColumn();
-                    ImGuiNET.ImGui.Text(wp.TowersCount.ToString());
+                    if (ImGuiNET.ImGui.SmallButton((Settings.WaypointJumpEnabled.Value ? "Jump" : "Jump off") + $"##wpjump_{i}"))
+                    {
+                        if (Settings.WaypointJumpEnabled.Value)
+                            QueueWaypointJumpToCoord(wp.X, wp.Y);
+                    }
+                    if (ImGuiNET.ImGui.IsItemHovered())
+                        ImGuiNET.ImGui.SetTooltip("Pan atlas to this waypoint without moving the mouse.");
 
-                    // Delete
+                    
                     ImGuiNET.ImGui.TableNextColumn();
-                    if (ImGuiNET.ImGui.SmallButton("X"))
+                    if (ImGuiNET.ImGui.SmallButton("Remove"))
                     {
                         bool wasSel = wp.Selected;
                         wps.RemoveAt(i);
@@ -1073,9 +1482,10 @@ namespace AtlasBiomeHighlighter
 
 
             ImGuiNET.ImGui.Separator();
-            if (ImGuiNET.ImGui.TreeNodeEx("Atlas", ImGuiNET.ImGuiTreeNodeFlags.DefaultOpen))
+            bool showStepsColumn = Settings.DrawShortestPath.Value;
+            if (ImGuiNET.ImGui.TreeNodeEx("Atlas Maps", ImGuiNET.ImGuiTreeNodeFlags.DefaultOpen))
             {
-                // Controls row
+                
                 ImGuiNET.ImGui.AlignTextToFramePadding();
                 ImGuiNET.ImGui.Text("Sort:");
                 ImGuiNET.ImGui.SameLine();
@@ -1094,7 +1504,7 @@ namespace AtlasBiomeHighlighter
                 if (ImGuiNET.ImGui.InputInt("##max", ref maxItems, 0, 0))
                     Settings.WaypointAtlasMaxItems.Value = Math.Clamp(maxItems, 5, 250);
 
-                // Dedicated +/- buttons to avoid text merging at narrow widths.
+                
                 ImGuiNET.ImGui.SameLine();
                 if (ImGuiNET.ImGui.SmallButton("-##max"))
                     Settings.WaypointAtlasMaxItems.Value = Math.Clamp(Settings.WaypointAtlasMaxItems.Value - 5, 5, 250);
@@ -1104,20 +1514,20 @@ namespace AtlasBiomeHighlighter
 
                 ImGuiNET.ImGui.SameLine();
                 bool unlockedOnly = Settings.WaypointAtlasUnlockedOnly.Value;
-                if (ImGuiNET.ImGui.Checkbox("Show Unlocked Maps Only", ref unlockedOnly))
+                if (ImGuiNET.ImGui.Checkbox("Unlocked Maps Only", ref unlockedOnly))
                     Settings.WaypointAtlasUnlockedOnly.Value = unlockedOnly;
 
-                // Search
+                
                 ImGuiNET.ImGui.Text("Search:");
                 ImGuiNET.ImGui.SameLine();
-                // Stretch search box with window.
+                
                 var searchWidth = Math.Max(180f, ImGuiNET.ImGui.GetContentRegionAvail().X * 0.35f);
                 ImGuiNET.ImGui.SetNextItemWidth(searchWidth);
                 ImGuiNET.ImGui.InputText("##search", ref _atlasSearch, 64);
 
                 ImGuiNET.ImGui.Spacing();
 
-                // Atlas table (bottom). Fill remaining space.
+                
                 var flags2 =
                     ImGuiNET.ImGuiTableFlags.RowBg |
                     ImGuiNET.ImGuiTableFlags.BordersInnerH |
@@ -1126,15 +1536,22 @@ namespace AtlasBiomeHighlighter
                     ImGuiNET.ImGuiTableFlags.Resizable;
 
                 var atlasAvail = ImGuiNET.ImGui.GetContentRegionAvail();
-                var tableH = Math.Max(220f, atlasAvail.Y);
-                if (ImGuiNET.ImGui.BeginTable("##atlas", 5, flags2, new System.Numerics.Vector2(0, tableH)))
+                var tableH = Math.Min(Math.Max(160f, atlasAvail.Y * 0.45f), 320f);
+                int atlasColumnCount = (_waypointPanelAdvancedMode ? 6 : 4) + (showStepsColumn ? 1 : 0);
+                if (ImGuiNET.ImGui.BeginTable("##atlas", atlasColumnCount, flags2, new System.Numerics.Vector2(0, tableH)))
                 {
                     using var waypointAtlasProfile = ProfileScope("Render waypoint panel atlas list");
-                    ImGuiNET.ImGui.TableSetupColumn("Map Name", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
+                    ImGuiNET.ImGui.TableSetupColumn("Map", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
                     ImGuiNET.ImGui.TableSetupColumn("Biome", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 130);
-                    ImGuiNET.ImGui.TableSetupColumn("X", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 45);
-                    ImGuiNET.ImGui.TableSetupColumn("Y", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 45);
-                    ImGuiNET.ImGui.TableSetupColumn("Way", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 55);
+                    if (showStepsColumn)
+                        ImGuiNET.ImGui.TableSetupColumn("Steps", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
+                    if (_waypointPanelAdvancedMode)
+                    {
+                        ImGuiNET.ImGui.TableSetupColumn("X", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 45);
+                        ImGuiNET.ImGui.TableSetupColumn("Y", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 45);
+                    }
+                    ImGuiNET.ImGui.TableSetupColumn("Jump", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
+                    ImGuiNET.ImGui.TableSetupColumn("Track", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 70);
                     ImGuiNET.ImGui.TableHeadersRow();
 
                     ProcessWaypointAtlasCacheBudget();
@@ -1146,10 +1563,20 @@ namespace AtlasBiomeHighlighter
                         ImGuiNET.ImGui.TextDisabled($"Searching... {_waypointAtlasRows.Count} shown");
                         ImGuiNET.ImGui.TableNextColumn();
                         ImGuiNET.ImGui.TextDisabled("cache");
+                        if (showStepsColumn)
+                        {
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("-");
+                        }
+                        if (_waypointPanelAdvancedMode)
+                        {
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("-");
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("-");
+                        }
                         ImGuiNET.ImGui.TableNextColumn();
-                        ImGuiNET.ImGui.TextDisabled("-");
-                        ImGuiNET.ImGui.TableNextColumn();
-                        ImGuiNET.ImGui.TextDisabled("-");
+                        ImGuiNET.ImGui.TextDisabled("...");
                         ImGuiNET.ImGui.TableNextColumn();
                         ImGuiNET.ImGui.TextDisabled("...");
                     }
@@ -1176,14 +1603,35 @@ namespace AtlasBiomeHighlighter
                         ImGuiNET.ImGui.TableNextColumn();
                         ImGuiNET.ImGui.TextUnformatted(row.Biome);
 
-                        ImGuiNET.ImGui.TableNextColumn();
-                        ImGuiNET.ImGui.TextUnformatted(row.X.ToString());
+                        if (showStepsColumn)
+                        {
+                            ImGuiNET.ImGui.TableNextColumn();
+                            if (TryGetAtlasRouteSteps(row.X, row.Y, out var steps))
+                                ImGuiNET.ImGui.TextUnformatted(steps.ToString());
+                            else
+                                ImGuiNET.ImGui.TextDisabled("-");
+                        }
+
+                        if (_waypointPanelAdvancedMode)
+                        {
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextUnformatted(row.X.ToString());
+
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextUnformatted(row.Y.ToString());
+                        }
 
                         ImGuiNET.ImGui.TableNextColumn();
-                        ImGuiNET.ImGui.TextUnformatted(row.Y.ToString());
+                        if (ImGuiNET.ImGui.SmallButton((Settings.WaypointJumpEnabled.Value ? "Jump" : "Jump off") + $"##mapjump_{row.X}_{row.Y}"))
+                        {
+                            if (Settings.WaypointJumpEnabled.Value)
+                                QueueWaypointJumpToCoord(row.X, row.Y);
+                        }
+                        if (ImGuiNET.ImGui.IsItemHovered())
+                            ImGuiNET.ImGui.SetTooltip("Pan atlas to this map without moving the mouse.");
 
                         ImGuiNET.ImGui.TableNextColumn();
-                        if (ImGuiNET.ImGui.SmallButton(hasWp ? "Del" : "Way"))
+                        if (ImGuiNET.ImGui.SmallButton((hasWp ? "Untrack" : "Track") + $"##maptrack_{row.X}_{row.Y}"))
                         {
                             if (hasWp)
                             {
@@ -1203,6 +1651,187 @@ namespace AtlasBiomeHighlighter
 
                     ImGuiNET.ImGui.EndTable();
                 }
+
+                ImGuiNET.ImGui.TreePop();
+            }
+
+            ImGuiNET.ImGui.Spacing();
+            if (ImGuiNET.ImGui.TreeNodeEx("Mechanic", ImGuiNET.ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGuiNET.ImGui.TextDisabled("Detected Map Content / Mechanics from Special Highlights. Use Search below to filter by map or mechanic name.");
+
+                ImGuiNET.ImGui.AlignTextToFramePadding();
+                ImGuiNET.ImGui.Text("Sort:");
+                ImGuiNET.ImGui.SameLine();
+                ImGuiNET.ImGui.TextDisabled("Mechanic");
+
+                ImGuiNET.ImGui.SameLine();
+                ImGuiNET.ImGui.Dummy(new Vector2(12, 0));
+                ImGuiNET.ImGui.SameLine();
+
+                ImGuiNET.ImGui.AlignTextToFramePadding();
+                ImGuiNET.ImGui.Text("Max Items:");
+                ImGuiNET.ImGui.SameLine();
+
+                int mechanicMaxItems = Settings.WaypointAtlasMaxItems.Value;
+                ImGuiNET.ImGui.SetNextItemWidth(50);
+                if (ImGuiNET.ImGui.InputInt("##mechanic_max", ref mechanicMaxItems, 0, 0))
+                    Settings.WaypointAtlasMaxItems.Value = Math.Clamp(mechanicMaxItems, 5, 250);
+
+                ImGuiNET.ImGui.SameLine();
+                if (ImGuiNET.ImGui.SmallButton("-##mechanic_max"))
+                    Settings.WaypointAtlasMaxItems.Value = Math.Clamp(Settings.WaypointAtlasMaxItems.Value - 5, 5, 250);
+                ImGuiNET.ImGui.SameLine();
+                if (ImGuiNET.ImGui.SmallButton("+##mechanic_max"))
+                    Settings.WaypointAtlasMaxItems.Value = Math.Clamp(Settings.WaypointAtlasMaxItems.Value + 5, 5, 250);
+
+                ImGuiNET.ImGui.SameLine();
+                bool mechanicUnlockedOnly = Settings.WaypointAtlasUnlockedOnly.Value;
+                if (ImGuiNET.ImGui.Checkbox("Unlocked Maps Only##mechanic_unlocked", ref mechanicUnlockedOnly))
+                    Settings.WaypointAtlasUnlockedOnly.Value = mechanicUnlockedOnly;
+
+                ImGuiNET.ImGui.Text("Search:");
+                ImGuiNET.ImGui.SameLine();
+                var mechanicSearchWidth = Math.Max(180f, ImGuiNET.ImGui.GetContentRegionAvail().X * 0.35f);
+                ImGuiNET.ImGui.SetNextItemWidth(mechanicSearchWidth);
+                ImGuiNET.ImGui.InputText("##mechanic_search", ref _mechanicSearch, 64);
+
+                ImGuiNET.ImGui.Spacing();
+
+                    var mechanicFlags =
+                        ImGuiNET.ImGuiTableFlags.RowBg |
+                        ImGuiNET.ImGuiTableFlags.BordersInnerH |
+                        ImGuiNET.ImGuiTableFlags.ScrollY |
+                        ImGuiNET.ImGuiTableFlags.SizingStretchProp |
+                        ImGuiNET.ImGuiTableFlags.Resizable;
+
+                    var mechanicAvail = ImGuiNET.ImGui.GetContentRegionAvail();
+                    var mechanicTableH = Math.Max(160f, mechanicAvail.Y);
+                    int mechanicColumnCount = (_waypointPanelAdvancedMode ? 7 : 5) + (showStepsColumn ? 1 : 0);
+                    if (ImGuiNET.ImGui.BeginTable("##atlas_mechanics", mechanicColumnCount, mechanicFlags, new Vector2(0, mechanicTableH)))
+                    {
+                        using var waypointMechanicProfile = ProfileScope("Render waypoint panel mechanic list");
+                        ImGuiNET.ImGui.TableSetupColumn("Mechanic", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
+                        ImGuiNET.ImGui.TableSetupColumn("Map", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
+                        ImGuiNET.ImGui.TableSetupColumn("Biome", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 110);
+                        if (showStepsColumn)
+                            ImGuiNET.ImGui.TableSetupColumn("Steps", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
+                        if (_waypointPanelAdvancedMode)
+                        {
+                            ImGuiNET.ImGui.TableSetupColumn("X", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 45);
+                            ImGuiNET.ImGui.TableSetupColumn("Y", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 45);
+                        }
+                        ImGuiNET.ImGui.TableSetupColumn("Jump", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
+                        ImGuiNET.ImGui.TableSetupColumn("Track", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 70);
+                        ImGuiNET.ImGui.TableHeadersRow();
+
+                        ProcessWaypointMechanicCacheBudget();
+
+                        if (_waypointMechanicBuildActive)
+                        {
+                            ImGuiNET.ImGui.TableNextRow();
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled($"Searching... {_waypointMechanicRows.Count} shown");
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("cache");
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("-");
+                            if (showStepsColumn)
+                            {
+                                ImGuiNET.ImGui.TableNextColumn();
+                                ImGuiNET.ImGui.TextDisabled("-");
+                            }
+                            if (_waypointPanelAdvancedMode)
+                            {
+                                ImGuiNET.ImGui.TableNextColumn();
+                                ImGuiNET.ImGui.TextDisabled("-");
+                                ImGuiNET.ImGui.TableNextColumn();
+                                ImGuiNET.ImGui.TextDisabled("-");
+                            }
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("...");
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextDisabled("...");
+                        }
+
+                        for (int i = 0; i < _waypointMechanicRows.Count; i++)
+                        {
+                            var row = _waypointMechanicRows[i];
+                            bool hasWp = false;
+                            for (int wi = 0; wi < wps.Count; wi++)
+                            {
+                                if (wps[wi].X == row.X && wps[wi].Y == row.Y)
+                                {
+                                    hasWp = true;
+                                    break;
+                                }
+                            }
+
+                            ImGuiNET.ImGui.PushID($"mechanic_{i}");
+                            ImGuiNET.ImGui.TableNextRow();
+
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextUnformatted(row.Mechanics);
+
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextUnformatted(row.MapName);
+
+                            ImGuiNET.ImGui.TableNextColumn();
+                            ImGuiNET.ImGui.TextUnformatted(row.Biome);
+
+                            if (showStepsColumn)
+                            {
+                                ImGuiNET.ImGui.TableNextColumn();
+                                if (TryGetAtlasRouteSteps(row.X, row.Y, out var steps))
+                                    ImGuiNET.ImGui.TextUnformatted(steps.ToString());
+                                else
+                                    ImGuiNET.ImGui.TextDisabled("-");
+                            }
+
+                            if (_waypointPanelAdvancedMode)
+                            {
+                                ImGuiNET.ImGui.TableNextColumn();
+                                ImGuiNET.ImGui.TextUnformatted(row.X.ToString());
+
+                                ImGuiNET.ImGui.TableNextColumn();
+                                ImGuiNET.ImGui.TextUnformatted(row.Y.ToString());
+                            }
+
+                            ImGuiNET.ImGui.TableNextColumn();
+                            if (ImGuiNET.ImGui.SmallButton((Settings.WaypointJumpEnabled.Value ? "Jump" : "Jump off") + $"##mechjump_{row.X}_{row.Y}"))
+                            {
+                                if (Settings.WaypointJumpEnabled.Value)
+                                    QueueWaypointJumpToCoord(row.X, row.Y);
+                            }
+                            if (ImGuiNET.ImGui.IsItemHovered())
+                                ImGuiNET.ImGui.SetTooltip("Pan atlas to this mechanic map without moving the mouse.");
+
+                            ImGuiNET.ImGui.TableNextColumn();
+                            if (ImGuiNET.ImGui.SmallButton((hasWp ? "Untrack" : "Track") + $"##mechtrack_{row.X}_{row.Y}"))
+                            {
+                                if (hasWp)
+                                {
+                                    for (int wi = wps.Count - 1; wi >= 0; wi--)
+                                        if (wps[wi].X == row.X && wps[wi].Y == row.Y)
+                                            wps.RemoveAt(wi);
+                                    SyncSelectedWaypoint();
+                                }
+                                else
+                                {
+                                    var waypointName = string.IsNullOrWhiteSpace(row.Mechanics)
+                                        ? row.MapName
+                                        : $"{row.MapName} - {row.Mechanics}";
+                                    AddWaypoint(row.Node, waypointName);
+                                }
+                            }
+                            if (ImGuiNET.ImGui.IsItemHovered())
+                                ImGuiNET.ImGui.SetTooltip("Track/untrack this mechanic map as a waypoint, so arrows and shortest-path routing can target it.");
+
+                            ImGuiNET.ImGui.PopID();
+                        }
+
+                        ImGuiNET.ImGui.EndTable();
+                    }
 
                 ImGuiNET.ImGui.TreePop();
             }
@@ -1248,7 +1877,7 @@ namespace AtlasBiomeHighlighter
             ImGuiNET.ImGui.Dummy(arrowSize);
         }
 
-        // PREFERRED_GUIDES
+        
         private void DrawArrow(System.Numerics.Vector2 from, System.Numerics.Vector2 to, int thickness, System.Drawing.Color color, int arrowSize)
         {
             Graphics.DrawLine(from, to, thickness, color);

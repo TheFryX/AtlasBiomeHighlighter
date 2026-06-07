@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Reflection;
+using System.Linq;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
 using Vector2 = System.Numerics.Vector2;
 
@@ -9,16 +10,16 @@ namespace AtlasBiomeHighlighter
 {
     internal static class Utility
     {
-	        /// <summary>
-	        /// Normalizes a user-facing or internal identifier into a comparison token:
-	        /// lower-case, alphanumeric only (spaces/punctuation removed).
-	        /// </summary>
+	        
+	        
+	        
+	        
 	        public static string NormalizeToken(string? value)
 	        {
 	            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
 	            var span = value.AsSpan();
-	            // Fast path: if already simple, avoid allocating intermediary builders.
-	            // We still allocate the final string.
+	            
+	            
 	            Span<char> buf = span.Length <= 256 ? stackalloc char[span.Length] : new char[span.Length];
 	            int n = 0;
 	            for (int i = 0; i < span.Length; i++)
@@ -30,10 +31,10 @@ namespace AtlasBiomeHighlighter
 	            return n == 0 ? string.Empty : new string(buf.Slice(0, n));
 	        }
 
-	        /// <summary>
-	        /// Takes a PreferredMaps dictionary key (option label) and returns the token used for matching.
-	        /// Convention: everything before '-' is treated as the map name; suffix is a tag (e.g., "- Best").
-	        /// </summary>
+	        
+	        
+	        
+	        
 	        public static string PreferredKeyToToken(string key)
 	        {
 	            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
@@ -44,10 +45,10 @@ namespace AtlasBiomeHighlighter
 	        }
 
 
-                /// <summary>
-                /// Extracts a human-friendly display name from a Preferred maps option key.
-                /// Example: "Savannah - Best" -> "Savannah".
-                /// </summary>
+                
+                
+                
+                
                 public static string PreferredKeyToDisplayName(string key)
                 {
                     if (string.IsNullOrWhiteSpace(key)) return string.Empty;
@@ -162,6 +163,7 @@ namespace AtlasBiomeHighlighter
                    NameContains(name, "CAPTION") ||
                    NameContains(name, "TEXTURE") ||
                    NameContains(name, "ICON") ||
+                   NameContains(name, "ART") ||
                    NameContains(name, "ATLASENTRY") ||
                    name.Equals("ID", StringComparison.OrdinalIgnoreCase);
         }
@@ -202,7 +204,7 @@ namespace AtlasBiomeHighlighter
                 ["MapUniqueSelenite"] = "The Silent Cave",
                 ["MapUniqueLake"] = "The Fractured Lake",
                 ["MapUniqueMegalith"] = "The Ezomyte Megaliths",
-                // Unique bosses (if we ever want label override)
+                
                 ["MapCavernCity"] = "Sacred Reservoir",
                 ["MapUberBoss_JadeCitadel"] = "The Jade Isles",
                 ["MapVaalVault"] = "Sealed Vault",
@@ -226,9 +228,9 @@ namespace AtlasBiomeHighlighter
 
         public static Biome TryGetBiome(AtlasNodeDescription nd)
         {
-            // Prefer direct .Biome if available.
-            // In current ExileCore2, Element.Biome can be an EndgameMapBiome object where ToString()
-            // may be unstable/empty, but its Id contains values like "Ocean".
+            
+            
+            
             var candidate = GetMember(nd.Element, "Biome");
             var name = ExtractString(candidate);
             var parsed = BiomeUtils.ParseOrUnknown(name);
@@ -240,7 +242,7 @@ namespace AtlasBiomeHighlighter
             parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Name")));
             if (parsed != Biome.Unknown) return parsed;
 
-            // Try common hops
+            
             foreach (var hopName in new[] {"AtlasPanelNode", "Node", "Area"})
             {
                 var hop = GetMember(nd.Element, hopName);
@@ -250,7 +252,7 @@ namespace AtlasBiomeHighlighter
                 if (p2 != Biome.Unknown) return p2;
             }
 
-            // Fallback: Id sometimes carries the hint (citadels etc.)
+            
             var id = ExtractString(GetMember(nd.Element, "Id")) ?? ExtractString(GetMember(GetMember(nd.Element,"Area"), "Id"));
             var pid = BiomeUtils.ParseOrUnknown(id);
             if (pid != Biome.Unknown) return pid;
@@ -271,6 +273,316 @@ namespace AtlasBiomeHighlighter
             AreaContainsExpedition = 1 << 8,
         }
 
+        public sealed class MechanicDefinition
+        {
+            public MechanicDefinition(string name, params string[] tokens)
+            {
+                Name = name;
+                Tokens = tokens == null || tokens.Length == 0 ? new[] { name } : tokens;
+            }
+
+            public string Name { get; }
+            public string[] Tokens { get; }
+        }
+
+        public static readonly MechanicDefinition[] MapContentMechanics =
+        {
+            
+            
+            
+            
+            new("Great Beast", "Great Beast", "CompanionsNotable1", "GreatBeast"),
+            new("Essence Trove", "Essence Trove", "AtlasIconContentEssence", "EssenceTrove"),
+            new("Monstrous Treasure", "Monstrous Treasure", "AtlasIconContentStrongBox", "MonstrousTreasure"),
+            new("Spirit Guide", "Spirit Guide", "AtlasIconContentAzmeriSpirit", "AzmeriSpirit", "SpiritGuide"),
+            new("Arcane Hordes", "Arcane Hordes", "ItemQuantityandRarity", "ArcaneHordes"),
+            new("Hunting Grounds", "Hunting Grounds", "Hunter", "HuntingGrounds"),
+            new("Nature Shrines", "Nature Shrines", "HybridShrineAzmeriSpirit", "NatureShrines"),
+            new("Crystalised Twinning", "Crystalised Twinning", "EssenceNotable1", "CrystalisedTwinning"),
+            new("Indomitable Essence", "Indomitable Essence", "EssenceNotable2", "IndomitableEssence"),
+            new("Azmeri Energisation", "Azmeri Energisation", "MoreWildWisps", "AzmeriEnergisation"),
+            new("Spirit Migration", "Spirit Migration", "VividPrimalWildWisps", "SpiritMigration"),
+            new("Sacred Spirit", "Sacred Spirit", "moresacredwisps", "SacredSpirit"),
+            new("Ancient Trove", "Ancient Trove", "StrongboxUnique", "StrongboxNotable2", "AncientTrove"),
+            new("Twice-Locked Boxes", "Twice-Locked Boxes", "StrongboxNotable1", "TwiceLockedBoxes"),
+            new("Power of Faith", "Power of Faith", "Shrines", "PowerOfFaith"),
+            new("Large Congregation", "Large Congregation", "ShrinesNode", "LargeCongregation"),
+            new("Zealous Reverence", "Zealous Reverence", "BossNotableSpawnAdditionalShrine", "ZealousReverence"),
+            new("Persistent Devotion", "Persistent Devotion", "GreedShrinenoteble", "PersistentDevotion"),
+            new("Rites of the Rogues", "Rites of the Rogues", "Anarchy5", "RitesOfTheRogues"),
+            new("Surprising Alliances", "Surprising Alliances", "AnarchyNode1", "SurprisingAlliances"),
+            new("Azmeri Bloodline", "Azmeri Bloodline", "Anarchy4", "AzmeriBloodline"),
+            new("Twinned Terrors", "Twinned Terrors", "StoneCircles", "TwinnedTerrors"),
+            new("Scattered Stones", "Scattered Stones", "StoneCirclesNode", "ScatteredStones"),
+            new("Map Area Modified", "Map Area Modified", "Mapnode", "MapAreaModified"),
+            new("Fleeing Exile", "Fleeing Exile", "AnarchyNotable2", "FleeingExile"),
+            new("Breach Hive", "Breach Hive", "BreachNotable4", "BreachHive"),
+            new("Simulacrum", "Simulacrum", "DeliriumNotable7"),
+            new("Chaotic Cacophony", "Chaotic Cacophony", "ElderShaperNotable1", "ChaoticCacophony"),
+            new("Affluent Armies", "Affluent Armies", "ItemRarity", "BossMapDrops", "AffluentArmies"),
+            new("Monstrous Treasure - Map Boss Unique", "Map Boss drops a Unique item", "ExceptionalItemsWeaponsShields", "MapBossUnique"),
+            new("Trialmaster's Trainee", "Trialmaster's Trainee", "VaalNotable1", "Inscribed Ultimatum"),
+            new("Sekhema's Student", "Sekhema's Student", "SorceressSandDjinnCorpseBeetles", "Djinn Barya"),
+            new("Azmeri Champion", "Azmeri Champion", "BossNotableAzmeriSpirit"),
+            new("Gigantic Uprising", "Gigantic Uprising", "MinionsandManaNotable"),
+            new("Glimmering Mutation", "Glimmering Mutation", "CurrencyNode"),
+            new("Stolen Power", "Stolen Power", "ScorchTheEarth"),
+            new("Headhunters", "Headhunters", "skullcracking"),
+            new("Swarming Spirits", "Swarming Spirits", "EnduranceFrenzyPowerChargeNode"),
+            new("Power Struggle", "Power Struggle", "BossNotableSpawnBeyondMonsters"),
+            new("Corrupted Mirage", "Corrupted Mirage", "CorruptedDefences"),
+            new("Energized Ley Lines", "Energized Ley Lines", "CaptivatedInterestKeystone"),
+            new("Exceptional Find", "Exceptional Find", "ExceptionalItemsBodyArmour"),
+            new("Water Influence", "Water Influence", "WaterBiome"),
+            new("Mountain Influence", "Mountain Influence", "MountainBiome"),
+            new("Grass Influence", "Grass Influence", "GrassBiome"),
+            new("Forest Influence", "Forest Influence", "ForestBiome"),
+            new("Swamp Influence", "Swamp Influence", "SwampBiome"),
+            new("Desert Influence", "Desert Influence", "DesertBiome"),
+            new("Immured Fury", "Immured Fury", "AtlasIconContentSanctificationBoss", "ImmuredFury"),
+            new("Mirage of Riches", "Mirage of Riches", "Currency2"),
+            new("Wisdom's Teachings", "Wisdom's Teachings", "BossNotableGrantMoreExperience"),
+            new("Tight Pockets", "Tight Pockets", "BossNotableDropMoreItems"),
+            new("Fragment of Immortality", "Fragment of Immortality", "IncreaseMinionLifeNode"),
+            new("Prosperous Populous", "Prosperous Populous", "ItemQuantity"),
+            new("Echoes of Power", "Echoes of Power", "GenericMinionNotable"),
+        };
+
+
+
+        private sealed class NormalizedMechanicDefinition
+        {
+            public NormalizedMechanicDefinition(MechanicDefinition source)
+            {
+                Name = source.Name;
+                Tokens = source.Tokens
+                    .Where(token => !string.IsNullOrWhiteSpace(token))
+                    .Select(token => new NormalizedMechanicToken(token, NormalizeToken(token), IsTextMechanicToken(token)))
+                    .ToArray();
+            }
+
+            public string Name { get; }
+            public NormalizedMechanicToken[] Tokens { get; }
+        }
+
+        private readonly struct NormalizedMechanicToken
+        {
+            public NormalizedMechanicToken(string raw, string normalized, bool isTextToken)
+            {
+                Raw = raw;
+                Normalized = normalized;
+                IsTextToken = isTextToken;
+            }
+
+            public string Raw { get; }
+            public string Normalized { get; }
+            public bool IsTextToken { get; }
+        }
+
+        private static readonly NormalizedMechanicDefinition[] NormalizedMapContentMechanics =
+            MapContentMechanics.Select(m => new NormalizedMechanicDefinition(m)).ToArray();
+
+        
+        
+        
+        
+        
+        private static readonly Dictionary<string, string[]> MechanicNamesByIdentifierToken =
+            BuildMechanicIdentifierLookup();
+
+        private static readonly (string Name, string Raw)[] TextMechanicTokens =
+            NormalizedMapContentMechanics
+                .SelectMany(m => m.Tokens.Where(t => t.IsTextToken).Select(t => (m.Name, t.Raw)))
+                .ToArray();
+
+        private static Dictionary<string, string[]> BuildMechanicIdentifierLookup()
+        {
+            var temp = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var mechanic in NormalizedMapContentMechanics)
+            {
+                foreach (var token in mechanic.Tokens)
+                {
+                    if (token.IsTextToken || string.IsNullOrEmpty(token.Normalized))
+                        continue;
+
+                    if (!temp.TryGetValue(token.Normalized, out var names))
+                    {
+                        names = new List<string>(1);
+                        temp[token.Normalized] = names;
+                    }
+
+                    if (!names.Contains(mechanic.Name, StringComparer.OrdinalIgnoreCase))
+                        names.Add(mechanic.Name);
+                }
+            }
+
+            return temp.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool IsTextMechanicToken(string token)
+        {
+            for (int i = 0; i < token.Length; i++)
+            {
+                char ch = token[i];
+                if (char.IsWhiteSpace(ch) || ch == '\'' || ch == '-' || ch == '[' || ch == ']')
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool IdentifierTokenMatches(string normalizedValue, string normalizedToken)
+        {
+            if (string.IsNullOrEmpty(normalizedValue) || string.IsNullOrEmpty(normalizedToken))
+                return false;
+
+            if (normalizedValue.Equals(normalizedToken, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            
+            
+            if (normalizedValue.EndsWith(normalizedToken + "dds", StringComparison.OrdinalIgnoreCase) ||
+                normalizedValue.EndsWith(normalizedToken + "png", StringComparison.OrdinalIgnoreCase) ||
+                normalizedValue.EndsWith(normalizedToken, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
+        }
+
+        public static IReadOnlyList<string> TryGetMechanicNames(AtlasNodeDescription nd)
+        {
+            
+            
+            
+            
+            
+            
+            
+            var result = new System.Collections.Generic.List<string>(2);
+
+            try
+            {
+                var root = nd.Element;
+                if (root == null)
+                    return result;
+
+                var seen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                void AddMechanicName(string name)
+                {
+                    if (seen.Add(name))
+                        result.Add(name);
+                }
+
+                void AddIdentifierToken(string? token)
+                {
+                    if (string.IsNullOrWhiteSpace(token))
+                        return;
+
+                    string normalized = NormalizeToken(token);
+                    if (normalized.Length == 0)
+                        return;
+
+                    if (MechanicNamesByIdentifierToken.TryGetValue(normalized, out var names))
+                    {
+                        for (int i = 0; i < names.Length; i++)
+                            AddMechanicName(names[i]);
+                    }
+                }
+
+                static string? ExtractFileStem(string value)
+                {
+                    int end = value.Length;
+                    int q = value.IndexOf('?');
+                    if (q >= 0) end = q;
+
+                    int slashA = value.LastIndexOf('/', end - 1);
+                    int slashB = value.LastIndexOf('\\', end - 1);
+                    int slash = slashA > slashB ? slashA : slashB;
+                    int start = slash >= 0 ? slash + 1 : 0;
+                    int dot = value.LastIndexOf('.', end - 1, end - start);
+                    int stemEnd = dot > start ? dot : end;
+
+                    if (stemEnd <= start)
+                        return null;
+
+                    return value.Substring(start, stemEnd - start);
+                }
+
+                void AddIfMatched(string? value, bool allowTextMatch = false)
+                {
+                    if (string.IsNullOrWhiteSpace(value))
+                        return;
+
+                    
+                    AddIdentifierToken(value);
+
+                    
+                    var stem = ExtractFileStem(value);
+                    if (!string.IsNullOrWhiteSpace(stem))
+                        AddIdentifierToken(stem);
+
+                    
+                    
+                    if (!allowTextMatch)
+                        return;
+
+                    for (int i = 0; i < TextMechanicTokens.Length; i++)
+                    {
+                        var token = TextMechanicTokens[i];
+                        if (value.IndexOf(token.Raw, StringComparison.OrdinalIgnoreCase) >= 0)
+                            AddMechanicName(token.Name);
+                    }
+                }
+
+                void AddIdentityLikeObject(object? obj)
+                {
+                    if (obj == null)
+                        return;
+
+                    
+                    AddIfMatched(ExtractString(obj));
+                    AddIfMatched(ExtractString(GetMember(obj, "Id")));
+                    AddIfMatched(ExtractString(GetMember(obj, "Name")));
+                    AddIfMatched(ExtractString(GetMember(obj, "AtlasIcon")));
+                    AddIfMatched(ExtractString(GetMember(obj, "PassiveArt")));
+                    AddIfMatched(ExtractString(GetMember(obj, "AtlasItemTexture")));
+                    AddIfMatched(ExtractString(GetMember(obj, "TextureName")));
+                }
+
+                void AddIdentityCollection(object? collection)
+                {
+                    if (collection is System.Collections.IEnumerable enumerable && collection is not string)
+                    {
+                        foreach (var item in enumerable)
+                            AddIdentityLikeObject(item);
+                    }
+                    else
+                    {
+                        AddIdentityLikeObject(collection);
+                    }
+                }
+
+                
+                AddIfMatched(ExtractString(GetMember(root, "Id")));
+                AddIfMatched(ExtractString(GetMember(root, "TextureName")));
+
+                var atlasEntry = GetMember(root, "AtlasEntry");
+                AddIfMatched(ExtractString(atlasEntry), allowTextMatch: true);
+                AddIfMatched(ExtractString(GetMember(atlasEntry, "Id")), allowTextMatch: true);
+                AddIfMatched(ExtractString(GetMember(atlasEntry, "Name")), allowTextMatch: true);
+                AddIfMatched(ExtractString(GetMember(atlasEntry, "Text")), allowTextMatch: true);
+                AddIfMatched(ExtractString(GetMember(atlasEntry, "Description")), allowTextMatch: true);
+
+                AddIdentityCollection(GetMember(root, "ContentIdentity"));
+                AddIdentityCollection(GetMember(root, "AtlasChildren"));
+            }
+            catch { }
+
+            return result;
+        }
+
         public static SpecialFlags TryGetSpecialFlags(AtlasNodeDescription nd)
         {
             try
@@ -279,16 +591,16 @@ namespace AtlasBiomeHighlighter
                 var root = nd.Element;
                 if (root == null) return flags;
 
-                // Fast ID checks
+                
                 string? id = ExtractString(GetMember(root, "Id")) ?? ExtractString(GetMember(GetMember(root, "Area"), "Id"));
                 if (!string.IsNullOrWhiteSpace(id))
                 {
                     if (id.StartsWith("MapUnique", System.StringComparison.OrdinalIgnoreCase))
                         flags |= SpecialFlags.UniqueMap;
 
-                    // Expedition atlas/logbook nodes do not expose the expedition marker via
-                    // ContentIdentity/AtlasChildren. The reliable marker is Area.Id, e.g.
-                    // ExpeditionLogBook_Tundra / ExpeditionLogBook_Tropical.
+                    
+                    
+                    
                     ClassifyStrict(id, ref flags);
                 }
 
@@ -297,12 +609,12 @@ namespace AtlasBiomeHighlighter
                 ClassifyStrict(ExtractString(GetMember(area, "Name")), ref flags);
                 ClassifyStrict(ExtractString(area), ref flags);
 
-                // AtlasEntry.Id contains league/atlas modifiers such as AtlasLeagueAbyssInnerNode18_.
+                
                 var atlasEntry = GetMember(root, "AtlasEntry");
                 ClassifyStrict(ExtractString(GetMember(atlasEntry, "Id")), ref flags);
                 ClassifyStrict(ExtractString(atlasEntry), ref flags);
 
-                // Deep scan for strict markers
+                
                 var stack = new System.Collections.Generic.Stack<object?>();
                 stack.Push(root);
                 while (stack.Count > 0)
@@ -355,16 +667,16 @@ namespace AtlasBiomeHighlighter
         {
             if (string.IsNullOrWhiteSpace(s)) return;
 
-            // Area contains Abysses / Abyss atlas node.
-            // Observed AtlasEntry.Id examples: AtlasLeagueAbyssInnerNode18_, AtlasLeagueAbyssInnerNode23.
+            
+            
             if (s.Contains("ATLASLEAGUEABYSS", StringComparison.OrdinalIgnoreCase) ||
                 s.Contains("AREA CONTAINS ABYSS", StringComparison.OrdinalIgnoreCase) ||
                 s.Contains("AREA CONTAINS ABYSSES", StringComparison.OrdinalIgnoreCase))
                 flags |= SpecialFlags.AreaContainsAbyss;
 
-            // Expedition nodes. Hover dumps show the actual atlas node uses
-            // Area.Id = ExpeditionLogBook_Tundra / ExpeditionLogBook_Tropical while
-            // the side panel may expose ContainsExpedition / ContainsExpedition2 icons.
+            
+            
+            
             if (s.Contains("EXPEDITIONLOGBOOK", StringComparison.OrdinalIgnoreCase) ||
                 s.Contains("ATLASLEAGUEEXPEDITION", StringComparison.OrdinalIgnoreCase) ||
                 s.Contains("CONTAINSEXPEDITION", StringComparison.OrdinalIgnoreCase) ||
@@ -373,15 +685,15 @@ namespace AtlasBiomeHighlighter
                 s.Contains("ATLASICONCONTENTEXPEDITION", StringComparison.OrdinalIgnoreCase))
                 flags |= SpecialFlags.AreaContainsExpedition;
 
-            // Strict Deadly Map Boss markers:
-            //  - TextureName ends with AtlasIconContentMapBossSpecial.dds
-            //  - text contains EXACT 'DEADLY MAP BOSS'
+            
+            
+            
             if (s.Contains("ATLASICONCONTENTMAPBOSSSPECIAL", StringComparison.OrdinalIgnoreCase))
                 flags |= SpecialFlags.DeadlyBoss;
             if (s.Contains("DEADLY MAP BOSS", StringComparison.OrdinalIgnoreCase))
                 flags |= SpecialFlags.DeadlyBoss;
 
-            // Corrupted Nexus icon (per screenshot): AtlasIconContentCorruptionNexus.dds
+            
             if (s.Contains("ATLASICONCONTENTCORRUPTIONNEXUS", StringComparison.OrdinalIgnoreCase) ||
                 s.Contains("ATLASICONCONTENTCORRUPTEDNEXUS", StringComparison.OrdinalIgnoreCase))
             {
@@ -389,14 +701,14 @@ namespace AtlasBiomeHighlighter
                 flags &= ~SpecialFlags.UniqueMap;
             }
 
-            // Trader (Moment of Zen / Merchant)
+            
             if (s.Contains("ATLASICONCONTENTTRADER", StringComparison.OrdinalIgnoreCase))
             {
                 flags |= SpecialFlags.MomentofZen;
                 flags &= ~SpecialFlags.UniqueMap;
             }
 
-            // Cleansed/Sanctified area icon (per screenshot): AtlasIconContentSanctification.dds
+            
             if (s.Contains("ATLASICONCONTENTSANCTIFICATION", StringComparison.OrdinalIgnoreCase))
             {
                 flags |= SpecialFlags.Cleansed;
@@ -422,8 +734,8 @@ namespace AtlasBiomeHighlighter
         {
             name = null;
 
-	            // Some special atlas content nodes have no visible label text (Text/TextNoTags == null).
-	            // For Preferred maps matching we still want a stable name.
+	            
+	            
 		            if ((sflags & SpecialFlags.CorruptedNexus) != 0)
 	            {
 	                name = "Corrupted Nexus";
@@ -435,14 +747,14 @@ namespace AtlasBiomeHighlighter
 	                return true;
 	            }
 
-            // 1) Unique Id mapping
+            
             if (TryGetUniqueNameFromId(nd, out var unm) && !string.IsNullOrWhiteSpace(unm))
             {
                 name = unm;
                 return true;
             }
 
-            // 1.25) Tower Id mapping (Mesa/Bluff/etc.)
+            
             try
             {
                 var id = ExtractString(GetMember(nd.Element, "Id")) ?? ExtractString(GetMember(GetMember(nd.Element, "Area"), "Id"));
@@ -454,7 +766,7 @@ namespace AtlasBiomeHighlighter
             }
             catch { }
 
-            // 1.5) Area.Name for normal maps
+            
             try
             {
                 var rootEl = nd.Element;
@@ -504,7 +816,7 @@ namespace AtlasBiomeHighlighter
                         }
                     }
 
-                    // traverse children
+                    
                     foreach (var p in GetCachedProperties(t))
                     {
                         if (IsChildCollectionMemberName(p.Name))
@@ -587,22 +899,22 @@ namespace AtlasBiomeHighlighter
                 var root = nd.Element;
                 if (root == null) return false;
 
-                // Prefer explicit flags
+                
                 var locked = GetMember(root, "IsLocked") ?? GetMember(root, "Locked");
                 if (locked is bool lb) return lb;
 
-                // Unlocked flag (negated)
+                
                 var unlocked = GetMember(root, "IsUnlocked") ?? GetMember(root, "Unlocked");
                 if (unlocked is bool ub) return !ub;
 
-                // Accessibility / discovery as hints
+                
                 var accessible = GetMember(root, "IsAccessible") ?? GetMember(root, "Accessible");
                 if (accessible is bool ac) return !ac;
 
                 var discovered = GetMember(root, "IsDiscovered") ?? GetMember(root, "Discovered");
                 if (discovered is bool dc) return !dc;
 
-                // Last resort: consider "locked" when not visited & not unlocked
+                
                 bool visited = (GetMember(root, "IsVisited") ?? GetMember(root, "Visited")) is bool vb && vb;
                 return !visited;
             }

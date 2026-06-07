@@ -7,10 +7,10 @@ using ExileCore2.Shared.Nodes;
 
 namespace AtlasBiomeHighlighter
 {
-    /// <summary>
-    /// Persisted user waypoint.
-    /// Stored as primitive fields to keep settings JSON stable.
-    /// </summary>
+    
+    
+    
+    
     public sealed class AtlasWaypoint
     {
         public int X { get; set; }
@@ -22,40 +22,46 @@ namespace AtlasBiomeHighlighter
         public int ColorArgb { get; set; } = Color.FromArgb(255, 255, 255, 255).ToArgb();
         public bool Selected { get; set; }
         public bool Enabled { get; set; } = true;
-        /// <summary>
-        /// Whether the waypoint's on-atlas label should be drawn when the main overlay is not
-        /// already drawing the map-name label for that node.
-        /// </summary>
+        
+        
+        
+        
         public bool ShowLabel { get; set; } = true;
         public string Name { get; set; } = string.Empty;
     }
 
     
-    /// <summary>
-    /// A user-defined group of preferred maps. Enabled groups are unioned for matching/highlighting.
-    /// Persisted in settings JSON.
-    /// </summary>
+    
+    
+    
+    
     public sealed class PreferredMapGroup
     {
         public string Name { get; set; } = "New Group";
 
-        /// <summary>
-        /// Whether this group contributes to the active Preferred-map set.
-        /// </summary>
+        
+        
+        
         public bool Enabled { get; set; } = true;
 
-        /// <summary>
-        /// Selected map keys (same labels as in <see cref="AtlasBiomeSettings.PreferredMaps"/>).
-        /// </summary>
+        
+        
+        
         public HashSet<string> Maps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        
+        
+        
+        
+        public HashSet<string> Mechanics { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class AtlasBiomeSettings : ISettings
     {
         public ToggleNode Enable { get; set; } = new(true);
 
-        // Screen / viewport overrides (useful for ultrawide and windowed modes where overlay size differs).
-        // 0 = auto-detect from the overlay/game window.
+        
+        
         public RangeNode<int> BorderX { get; set; } = new(0, 0, 10000);
         public RangeNode<int> BorderY { get; set; } = new(0, 0, 10000);
 
@@ -68,20 +74,26 @@ namespace AtlasBiomeHighlighter
         public ToggleNode DebugMode { get; set; } = new(false);
         public ToggleNode DebugPreferredMaps { get; set; } = new(false);
         public ToggleNode DebugPreferredDetails { get; set; } = new(false);
+        public ToggleNode DebugNavigationTargets { get; set; } = new(false);
         public ToggleNode PerformanceProfiling { get; set; } = new(false);
         public RangeNode<int> PerformanceSpikeThresholdMs { get; set; } = new(4, 1, 50);
 
-    // Hide overlay on completed (green) atlas nodes
+        
+        
+        public ToggleNode FastRingRendering { get; set; } = new(true);
+        public RangeNode<int> FastRingMaxSegments { get; set; } = new(8, 5, 16);
+
+    
         public ToggleNode HideCompletedMaps { get; set; } = new(true);
 
-    // Hide overlay on 'Attempted' atlas nodes
+    
         public ToggleNode HideAttemptedMaps { get; set; } = new(false);
 
-    // Hide overlay on locked/unavailable nodes
+    
         public ToggleNode HideLockedMaps { get; set; } = new(false);
 
 
-        // Special highlights (strict/low-noise)
+        
         public ToggleNode HighlightDeadlyBoss { get; set; } = new(true);
         public ColorNode DeadlyBossRingColor { get; set; } = new(Color.FromArgb(220, 60, 60));
         public ToggleNode HighlightCorruptedNexus { get; set; } = new(true);
@@ -95,22 +107,83 @@ namespace AtlasBiomeHighlighter
         public ToggleNode HighlightAreaContainsExpedition { get; set; } = new(true);
         public ColorNode AreaContainsExpeditionRingColor { get; set; } = new(Color.FromArgb(255, 170, 40));
         public ToggleNode HighlightPreferredMaps { get; set; } = new(false);
-        public ColorNode PreferredMapRingColor { get; set; } = new(Color.FromArgb(0, 206, 209)); // teal
+        public ColorNode PreferredMapRingColor { get; set; } = new(Color.FromArgb(0, 206, 209)); 
 
-        // Directional guides to Preferred maps
+        public Dictionary<string, ToggleNode> MechanicHighlights { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Great Beast"] = new(false),
+            ["Essence Trove"] = new(false),
+            ["Monstrous Treasure"] = new(false),
+            ["Spirit Guide"] = new(false),
+            ["Arcane Hordes"] = new(false),
+            ["Hunting Grounds"] = new(false),
+            ["Nature Shrines"] = new(false),
+            ["Crystalised Twinning"] = new(false),
+            ["Indomitable Essence"] = new(false),
+            ["Azmeri Energisation"] = new(false),
+            ["Spirit Migration"] = new(false),
+            ["Sacred Spirit"] = new(false),
+            ["Ancient Trove"] = new(false),
+            ["Twice-Locked Boxes"] = new(false),
+            ["Power of Faith"] = new(false),
+            ["Large Congregation"] = new(false),
+            ["Zealous Reverence"] = new(false),
+            ["Persistent Devotion"] = new(false),
+            ["Rites of the Rogues"] = new(false),
+            ["Surprising Alliances"] = new(false),
+            ["Azmeri Bloodline"] = new(false),
+            ["Twinned Terrors"] = new(false),
+            ["Scattered Stones"] = new(false),
+            ["Map Area Modified"] = new(false),
+            ["Fleeing Exile"] = new(false),
+            ["Breach Hive"] = new(false),
+            ["Simulacrum"] = new(false),
+            ["Chaotic Cacophony"] = new(false),
+            ["Affluent Armies"] = new(false),
+            ["Monstrous Treasure - Map Boss Unique"] = new(false),
+            ["Trialmaster's Trainee"] = new(false),
+            ["Sekhema's Student"] = new(false),
+            ["Azmeri Champion"] = new(false),
+            ["Gigantic Uprising"] = new(false),
+            ["Glimmering Mutation"] = new(false),
+            ["Stolen Power"] = new(false),
+            ["Headhunters"] = new(false),
+            ["Swarming Spirits"] = new(false),
+            ["Power Struggle"] = new(false),
+            ["Corrupted Mirage"] = new(false),
+            ["Energized Ley Lines"] = new(false),
+            ["Exceptional Find"] = new(false),
+            ["Water Influence"] = new(false),
+            ["Mountain Influence"] = new(false),
+            ["Grass Influence"] = new(false),
+            ["Forest Influence"] = new(false),
+            ["Swamp Influence"] = new(false),
+            ["Desert Influence"] = new(false),
+            ["Immured Fury"] = new(false),
+            ["Mirage of Riches"] = new(false),
+            ["Wisdom's Teachings"] = new(false),
+            ["Tight Pockets"] = new(false),
+            ["Fragment of Immortality"] = new(false),
+            ["Prosperous Populous"] = new(false),
+            ["Echoes of Power"] = new(false),
+        };
+        public ColorNode MechanicHighlightRingColor { get; set; } = new(Color.FromArgb(90, 210, 255));
+
+        
         public ToggleNode PreferredGuideLines { get; set; } = new(true);
         public ToggleNode PreferredGuideOnlyOffscreen { get; set; } = new(false);
         public ToggleNode PreferredGuideFromScreenCenter { get; set; } = new(true);
         public RangeNode<int> PreferredGuideThickness { get; set; } = new(2, 1, 8);
         public RangeNode<int> PreferredArrowSize { get; set; } = new(12, 6, 28);
         public RangeNode<int> PreferredGuideLimit { get; set; } = new(40, 5, 200);
+        public HotkeyNode PreferredGuideLinesToggleHotkey { get; set; } = new(Keys.Home);
     
-        // Preferred map groups (tabs). Enabled groups are unioned.
-        // Backwards compatible: if empty, plugin will migrate old PreferredMaps toggles into a "Default" group.
+        
+        
         public List<PreferredMapGroup> PreferredMapGroups { get; set; } = new();
 
-        // Master list of user-selectable preferred map names (labels). Values are no longer used for logic
-        // once groups are enabled, but are kept for compatibility and to avoid breaking saved settings.
+        
+        
         public Dictionary<string, ToggleNode> PreferredMaps { get; set; } = new()
         {
             ["Arid Plains"] = new(false),
@@ -282,7 +355,7 @@ namespace AtlasBiomeHighlighter
         public ExileCore2.Shared.Nodes.ColorNode MomentofZenRingColor { get; set; } = new(System.Drawing.Color.FromArgb(255, 208, 207));
         public ToggleNode PreferMapNameForDeadly { get; set; } = new(true);
 
-        // Minimal but readable labels
+        
         public RangeNode<int> LabelOffset { get; set; } = new(20, -60, 60);
         public ToggleNode LabelUseBiomeColor { get; set; } = new(true);
         public ColorNode LabelTextColor { get; set; } = new(Color.White);
@@ -290,21 +363,31 @@ namespace AtlasBiomeHighlighter
         public RangeNode<int> LabelOutlineThickness { get; set; } = new(2, 1, 6);
         public ToggleNode LabelBold { get; set; } = new(true);
 
-        // ===== Requested features =====
-        // Map name labels (independent from biome/special labels).
+        
+        
         public ToggleNode ShowMapNames { get; set; } = new(true);
+        public ToggleNode ShowMapStatus { get; set; } = new(false);
         public RangeNode<int> MapNameOffsetY { get; set; } = new(34, -10, 120);
-        // Map connections overlay.
+        
         public ToggleNode DrawMapConnections { get; set; } = new(false);
         public ToggleNode DrawVisitedConnections { get; set; } = new(false);
         public ColorNode ConnectionColor { get; set; } = new(Color.FromArgb(230, 230, 230));
         public ColorNode ConnectionColorLocked { get; set; } = new(Color.FromArgb(120, 120, 120));
         public RangeNode<int> ConnectionThickness { get; set; } = new(1, 1, 6);
 
-        // Waypoints.
-        public ToggleNode WaypointsEnabled { get; set; } = new(false);
+        
+        public ToggleNode WaypointsEnabled { get; set; } = new(true);
         public ToggleNode ShowWaypointsOnAtlas { get; set; } = new(true);
         public ToggleNode ShowWaypointArrowsOnAtlas { get; set; } = new(true);
+
+
+        
+        public ToggleNode WaypointJumpEnabled { get; set; } = new(true);
+        public RangeNode<int> WaypointJumpIterations { get; set; } = new(220, 60, 420);
+        public RangeNode<int> WaypointJumpStopDistance { get; set; } = new(64, 24, 180);
+        public RangeNode<int> WaypointJumpDelayMs { get; set; } = new(8, 4, 35);
+        public ToggleNode WaypointJumpMemoryWriteTest { get; set; } = new(true);
+        public RangeNode<int> WaypointJumpMemoryWriteMaxStep { get; set; } = new(1024, 64, 4096);
         public List<AtlasWaypoint> Waypoints { get; set; } = new();
         public ColorNode DefaultWaypointColor { get; set; } = new(Color.FromArgb(255, 80, 80));
         public RangeNode<int> WaypointRingRadius { get; set; } = new(32, 8, 64);
@@ -312,22 +395,23 @@ namespace AtlasBiomeHighlighter
         public RangeNode<int> WaypointAtlasMaxItems { get; set; } = new(30, 5, 250);
         public ToggleNode WaypointAtlasUnlockedOnly { get; set; } = new(false);
 
-        // Shortest path.
-        // Optional: draw a full shortest-path polyline to the selected waypoint.
-        // Users requested that adding a waypoint should NOT automatically draw "roads" to it.
-        public ToggleNode DrawShortestPath { get; set; } = new(false);
+        
+        
+        
+        public ToggleNode DrawShortestPath { get; set; } = new(true);
         public ColorNode ShortestPathColor { get; set; } = new(Color.FromArgb(255, 140, 0));
         public RangeNode<int> ShortestPathThickness { get; set; } = new(3, 1, 10);
 
-        // Tower range.
+        
         public ToggleNode DrawTowerRange { get; set; } = new(false);
         public RangeNode<int> TowerRange { get; set; } = new(11, 1, 30);
         public ColorNode TowerRangeColor { get; set; } = new(Color.FromArgb(255, 255, 255));
 
-        // Hotkeys.
+        
         public HotkeyNode AddWaypointHotkey { get; set; } = new(Keys.Insert);
         public HotkeyNode DeleteWaypointHotkey { get; set; } = new(Keys.Delete);
         public HotkeyNode ToggleWaypointPanelHotkey { get; set; } = new(Keys.End);
+        public HotkeyNode ToggleShortestPathHotkey { get; set; } = new(Keys.PageDown);
         public HotkeyNode ShowTowerRangeHotkey { get; set; } = new(Keys.PageUp);
 
         public Dictionary<Biome, ToggleNode> Visible { get; } = new()

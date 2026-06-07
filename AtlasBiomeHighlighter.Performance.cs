@@ -1,17 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
 
 namespace AtlasBiomeHighlighter
 {
     public partial class AtlasBiomeHighlighter
     {
-        // Cached per-node data consumed by Render().
+        
         private List<NodeRenderInfo> _visibleNodeInfos = new(256);
 
-        // Stage2: build visible/status caches incrementally into scratch buffers, then publish atomically.
-        // This avoids 50-90ms stalls from scanning the entire atlas in one Tick().
+        
+        
         private List<AtlasNodeDescription> _visibleNodesNext = new(256);
         private List<NodeRenderInfo> _visibleNodeInfosNext = new(256);
         private Dictionary<(int x, int y), NodeStatus> _statusByCoordNext = new(1024);
@@ -22,12 +23,12 @@ namespace AtlasBiomeHighlighter
         private const int VisibleCacheBuildMinItemsBeforeTimeSlice = 16;
         private const double VisibleCacheBuildTimeBudgetMs = 2.25;
 
-        // Cached flags by coordinate for graph rendering/pathfinding (connections, etc.).
+        
         private Dictionary<(int x, int y), NodeStatus> _statusByCoord = new(1024);
 
-        // Stage11: prebuilt, de-duplicated connection segments for the current visible atlas cache.
-        // Render() must only draw these prepared segments; it should not seed visible nodes,
-        // walk neighbor lists, or remove duplicate edges every frame.
+        
+        
+        
         private readonly List<ConnectionRenderSegment> _visibleConnectionSegments = new(768);
 
         private readonly struct ConnectionRenderSegment
@@ -85,7 +86,9 @@ namespace AtlasBiomeHighlighter
                 string? mapName,
                 string? uniqueName,
                 string nameToken,
-                string idToken)
+                string idToken,
+                string[] mechanicNames,
+                string[] mechanicTokens)
             {
                 Node = node;
                 Biome = biome;
@@ -100,6 +103,8 @@ namespace AtlasBiomeHighlighter
                 UniqueName = uniqueName;
                 NameToken = nameToken;
                 IdToken = idToken;
+                MechanicNames = mechanicNames ?? Array.Empty<string>();
+                MechanicTokens = mechanicTokens ?? Array.Empty<string>();
             }
 
             public AtlasNodeDescription Node { get; }
@@ -115,14 +120,16 @@ namespace AtlasBiomeHighlighter
             public string? UniqueName { get; }
             public string NameToken { get; }
             public string IdToken { get; }
+            public string[] MechanicNames { get; }
+            public string[] MechanicTokens { get; }
         }
 
-        /// <summary>
-        /// Incrementally rebuilds visible-node caches and per-coordinate status caches.
-        /// Each call processes a small fixed budget and publishes the new cache only when complete.
-        /// Render() keeps using the previous completed cache while a rebuild is in progress.
-        /// </summary>
-        /// <returns>True when the current rebuild pass has completed.</returns>
+        
+        
+        
+        
+        
+        
         private bool RebuildVisibleCaches()
         {
             if (_atlasNodes.Length == 0)
@@ -145,8 +152,8 @@ namespace AtlasBiomeHighlighter
                 _visibleCacheBuildInProgress = true;
             }
 
-            // Stage8: keep the old item-budget, but also cap the wall-clock work per Tick.
-            // This smooths rare rebuild spikes without changing visible quality or drawing behavior.
+            
+            
             long buildStartTimestamp = Stopwatch.GetTimestamp();
             int processed = 0;
             int i = _visibleCacheBuildIndex;
@@ -171,7 +178,7 @@ namespace AtlasBiomeHighlighter
                 {
                     _visibleNodesNext.Add(nd);
 
-                    // NodeRenderInfo caches the things we otherwise would query repeatedly every Render().
+                    
                     var biome = Utility.TryGetBiome(nd);
                     var biomeDisplay = BiomeUtils.Display(biome);
                     var sflags = Utility.TryGetSpecialFlags(nd);
@@ -195,6 +202,14 @@ namespace AtlasBiomeHighlighter
                     if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Utility.TryGetUniqueNameFromId(nd, out var un) && !string.IsNullOrWhiteSpace(un))
                         uniqueName = un;
 
+                    var mechanicNames = Utility.TryGetMechanicNames(nd);
+                    var mechanicArray = mechanicNames.Count == 0
+                        ? Array.Empty<string>()
+                        : mechanicNames.ToArray();
+                    var mechanicTokenArray = mechanicArray.Length == 0
+                        ? Array.Empty<string>()
+                        : mechanicArray.Select(Utility.NormalizeToken).Where(t => t.Length != 0).Distinct(StringComparer.Ordinal).ToArray();
+
                     _visibleNodeInfosNext.Add(new NodeRenderInfo(
                         nd,
                         biome,
@@ -208,7 +223,9 @@ namespace AtlasBiomeHighlighter
                         mapName,
                         uniqueName,
                         nameToken,
-                        idToken));
+                        idToken,
+                        mechanicArray,
+                        mechanicTokenArray));
                 }
 
                 if (processed >= VisibleCacheBuildMinItemsBeforeTimeSlice && (processed & 15) == 0)
@@ -230,7 +247,7 @@ namespace AtlasBiomeHighlighter
 
         private void PublishVisibleCaches()
         {
-            // O(1) publish: swap buffers instead of copying hundreds/thousands of entries.
+            
             (_visibleNodes, _visibleNodesNext) = (_visibleNodesNext, _visibleNodes);
             (_visibleNodeInfos, _visibleNodeInfosNext) = (_visibleNodeInfosNext, _visibleNodeInfos);
             (_statusByCoord, _statusByCoordNext) = (_statusByCoordNext, _statusByCoord);
@@ -261,7 +278,7 @@ namespace AtlasBiomeHighlighter
                 {
                     var dstKey = neighbors[j];
 
-                    // Build unique edges once. Render() should never pay this duplicate check cost.
+                    
                     if (dstKey.x < srcKey.x || (dstKey.x == srcKey.x && dstKey.y <= srcKey.y))
                         continue;
 

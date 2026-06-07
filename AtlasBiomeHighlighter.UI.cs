@@ -1,5 +1,9 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Windows.Forms;
+using ExileCore2.Shared.Nodes;
 using ImGuiNET;
 
 namespace AtlasBiomeHighlighter
@@ -7,10 +11,15 @@ namespace AtlasBiomeHighlighter
     public partial class AtlasBiomeHighlighter
     {
         private string _preferredFilter = string.Empty;
+        private string _specialMechanicFilter = string.Empty;
         private string _newPreferredGroupName = "New Group";
         private string _renamePreferredGroupName = string.Empty;
         private int _selectedPreferredGroup;
         private bool _renamePreferredGroupPopupOpen;
+        private bool _capturingPreferredGuideHotkey;
+        private bool _capturingWaypointHotkey;
+        private HotkeyNode? _capturingWaypointHotkeyNode;
+        private string _capturingWaypointHotkeyLabel = string.Empty;
 
         public override void DrawSettings()
         {
@@ -36,6 +45,7 @@ namespace AtlasBiomeHighlighter
             { bool v = s.Enable.Value; if (ImGui.Checkbox("Enable", ref v)) s.Enable.Value = v; }
             { bool v = s.ShowLabels.Value; if (ImGui.Checkbox("Show labels", ref v)) s.ShowLabels.Value = v; }
             { bool v = s.ShowMapNames.Value; if (ImGui.Checkbox("Show map names", ref v)) s.ShowMapNames.Value = v; }
+            { bool v = s.ShowMapStatus.Value; if (ImGui.Checkbox("Show map status", ref v)) s.ShowMapStatus.Value = v; }
             { int v = s.MapNameOffsetY.Value; if (ImGui.SliderInt("Map name Y offset", ref v, s.MapNameOffsetY.Min, s.MapNameOffsetY.Max)) s.MapNameOffsetY.Value = v; }
 
             ImGui.Separator();
@@ -55,6 +65,8 @@ namespace AtlasBiomeHighlighter
             { int v = s.NodeRadius.Value; if (ImGui.SliderInt("Node radius", ref v, s.NodeRadius.Min, s.NodeRadius.Max)) s.NodeRadius.Value = v; }
             { int v = s.RingThickness.Value; if (ImGui.SliderInt("Ring thickness", ref v, s.RingThickness.Min, s.RingThickness.Max)) s.RingThickness.Value = v; }
             { float v = s.Opacity.Value; if (ImGui.SliderFloat("Opacity", ref v, s.Opacity.Min, s.Opacity.Max)) s.Opacity.Value = v; }
+            { bool v = s.FastRingRendering.Value; if (ImGui.Checkbox("Fast ring rendering", ref v)) s.FastRingRendering.Value = v; }
+            { int v = s.FastRingMaxSegments.Value; if (ImGui.SliderInt("Fast ring max segments", ref v, s.FastRingMaxSegments.Min, s.FastRingMaxSegments.Max)) s.FastRingMaxSegments.Value = v; }
 
             ImGui.Separator();
             ImGui.TextDisabled("Connections");
@@ -241,19 +253,24 @@ namespace AtlasBiomeHighlighter
             }
 
             ImGui.Separator();
-            if (ImGui.CollapsingHeader("Preferred Guide Lines"))
+            if (ImGui.CollapsingHeader("Guide & Key Settings"))
             {
                 ImGui.Indent();
+                
+                
+                
+                s.PreferredGuideOnlyOffscreen.Value = false;
+                s.PreferredGuideFromScreenCenter.Value = true;
+
                 { bool v = s.PreferredGuideLines.Value; if (ImGui.Checkbox("Draw Preferred guide lines", ref v)) s.PreferredGuideLines.Value = v; }
-                { bool v = s.PreferredGuideOnlyOffscreen.Value; if (ImGui.Checkbox("Only when off-screen", ref v)) s.PreferredGuideOnlyOffscreen.Value = v; }
-                { bool v = s.PreferredGuideFromScreenCenter.Value; if (ImGui.Checkbox("Origin at screen center", ref v)) s.PreferredGuideFromScreenCenter.Value = v; }
+                DrawPreferredGuideHotkeySelector(s);
                 { int v = s.PreferredGuideThickness.Value; if (ImGui.SliderInt("Guide thickness", ref v, 1, 8)) s.PreferredGuideThickness.Value = v; }
                 { int v = s.PreferredArrowSize.Value; if (ImGui.SliderInt("Arrow size", ref v, 6, 28)) s.PreferredArrowSize.Value = v; }
                 { int v = s.PreferredGuideLimit.Value; if (ImGui.SliderInt("Max guide count", ref v, 5, 200)) s.PreferredGuideLimit.Value = v; }
                 ImGui.Unindent();
             }
 
-            ImGui.TextDisabled("Select maps for this group:");
+            ImGui.TextDisabled("Select maps / mechanics for this group:");
             ImGui.InputText("Filter##preferred", ref _preferredFilter, 128);
             ImGui.BeginChild("##preferred_maps_child", new Vector2(0, 300), ImGuiChildFlags.Border, ImGuiWindowFlags.None);
 
@@ -263,6 +280,7 @@ namespace AtlasBiomeHighlighter
             DrawPreferredCategory("Atlas Objects", activeGroup, key => IsPreferredInCategory(key, PreferredAtlasObjects));
             DrawPreferredCategory("Hideout", activeGroup, key => IsPreferredInCategory(key, PreferredHideouts));
             DrawPreferredCategory("Unique Maps", activeGroup, key => IsPreferredInCategory(key, PreferredUniqueMaps));
+            DrawPreferredMechanicsCategory("Mechanics", activeGroup);
 
             ImGui.EndChild();
             ImGui.Unindent();
@@ -282,10 +300,21 @@ namespace AtlasBiomeHighlighter
             { bool v = s.WaypointsEnabled.Value; if (ImGui.Checkbox("Waypoints enabled", ref v)) s.WaypointsEnabled.Value = v; }
             DrawColorEdit("Default waypoint color", s.DefaultWaypointColor.Value, c => s.DefaultWaypointColor.Value = c, false);
 
+            
+            
+
             ImGui.Separator();
-            { bool v = s.DrawShortestPath.Value; if (ImGui.Checkbox("Draw shortest path to selected waypoint", ref v)) s.DrawShortestPath.Value = v; }
-            DrawColorEdit("Shortest path color", s.ShortestPathColor.Value, c => s.ShortestPathColor.Value = c, false);
-            ImGui.TextDisabled("Hotkeys: Insert add waypoint, Delete remove, End waypoint window.");
+            if (ImGui.CollapsingHeader("Key Settings"))
+            {
+                ImGui.Indent();
+                DrawWaypointHotkeySelector("Add waypoint", s.AddWaypointHotkey, "WaypointAddHotkeyCapturePopup", "default: Insert");
+                DrawWaypointHotkeySelector("Remove hovered waypoint", s.DeleteWaypointHotkey, "WaypointDeleteHotkeyCapturePopup", "default: Delete");
+                DrawWaypointHotkeySelector("Toggle Navigator window", s.ToggleWaypointPanelHotkey, "WaypointPanelHotkeyCapturePopup", "default: End");
+                DrawWaypointHotkeySelector("Toggle shortest path", s.ToggleShortestPathHotkey, "WaypointShortestPathHotkeyCapturePopup", "default: PageDown");
+                DrawWaypointHotkeyCapturePopup();
+                ImGui.TextDisabled("Click a key button, then press a new key. Esc cancels, Clear disables.");
+                ImGui.Unindent();
+            }
             ImGui.Unindent();
         }
 
@@ -307,6 +336,8 @@ namespace AtlasBiomeHighlighter
             if (!ImGui.CollapsingHeader("Special Highlights"))
                 return;
 
+            EnsureMechanicHighlightSettings(s);
+
             ImGui.Indent();
             DrawHighlightRow("Deadly Map Boss", s.HighlightDeadlyBoss.Value, v => s.HighlightDeadlyBoss.Value = v, "DeadlyBoss", s.DeadlyBossRingColor.Value, c => s.DeadlyBossRingColor.Value = c);
             DrawHighlightRow("Moment of Zen / Merchant", s.HighlightMomentofZen.Value, v => s.HighlightMomentofZen.Value = v, "MomentofZen", s.MomentofZenRingColor.Value, c => s.MomentofZenRingColor.Value = c);
@@ -317,9 +348,79 @@ namespace AtlasBiomeHighlighter
             DrawHighlightRow("Area contains Expedition", s.HighlightAreaContainsExpedition.Value, v => s.HighlightAreaContainsExpedition.Value = v, "AreaContainsExpedition", s.AreaContainsExpeditionRingColor.Value, c => s.AreaContainsExpeditionRingColor.Value = c);
 
             ImGui.Separator();
+            if (ImGui.CollapsingHeader("Map Content / Mechanics", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+                ImGui.SetNextItemWidth(260f);
+                ImGui.InputText("Search##SpecialMechanicSearch", ref _specialMechanicFilter, 64);
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Clear##SpecialMechanicSearchClear"))
+                    _specialMechanicFilter = string.Empty;
+                ImGui.SameLine();
+                if (ImGui.SmallButton("On All##SpecialMechanicsOnAll"))
+                    SetAllMechanicHighlights(s, true);
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Off All##SpecialMechanicsOffAll"))
+                    SetAllMechanicHighlights(s, false);
+
+                DrawColorEdit("Mechanic highlight color", s.MechanicHighlightRingColor.Value, c => s.MechanicHighlightRingColor.Value = c, false);
+
+                int visible = 0;
+                foreach (var mechanic in Utility.MapContentMechanics)
+                {
+                    if (!string.IsNullOrWhiteSpace(_specialMechanicFilter) &&
+                        mechanic.Name.IndexOf(_specialMechanicFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    if (!s.MechanicHighlights.TryGetValue(mechanic.Name, out var node))
+                    {
+                        node = new ToggleNode(false);
+                        s.MechanicHighlights[mechanic.Name] = node;
+                    }
+
+                    bool enabled = node.Value;
+                    if (ImGui.Checkbox($"{mechanic.Name}##mechanic_{mechanic.Name}", ref enabled))
+                        node.Value = enabled;
+                    visible++;
+                }
+
+                if (visible == 0)
+                    ImGui.TextDisabled("No mechanics match the current search.");
+                ImGui.TextDisabled("Detected from ContentIdentity/PassiveArt before hover; enabled entries draw one clean mechanic ring.");
+                ImGui.Unindent();
+            }
+
+            ImGui.Separator();
             { int v = s.SpecialRingThickness.Value; if (ImGui.SliderInt("Special ring thickness", ref v, s.SpecialRingThickness.Min, s.SpecialRingThickness.Max)) s.SpecialRingThickness.Value = v; }
             { float v = s.SpecialAlphaMultiplier.Value; if (ImGui.SliderFloat("Special alpha multiplier", ref v, s.SpecialAlphaMultiplier.Min, s.SpecialAlphaMultiplier.Max)) s.SpecialAlphaMultiplier.Value = v; }
             ImGui.Unindent();
+        }
+
+        private static void SetAllMechanicHighlights(AtlasBiomeSettings settings, bool enabled)
+        {
+            foreach (var mechanic in Utility.MapContentMechanics)
+            {
+                if (!settings.MechanicHighlights.TryGetValue(mechanic.Name, out var node))
+                {
+                    node = new ToggleNode(enabled);
+                    settings.MechanicHighlights[mechanic.Name] = node;
+                    continue;
+                }
+
+                node.Value = enabled;
+            }
+        }
+
+        private static void EnsureMechanicHighlightSettings(AtlasBiomeSettings s)
+        {
+            if (s.MechanicHighlights == null)
+                s.MechanicHighlights = new System.Collections.Generic.Dictionary<string, ToggleNode>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var mechanic in Utility.MapContentMechanics)
+            {
+                if (!s.MechanicHighlights.ContainsKey(mechanic.Name))
+                    s.MechanicHighlights[mechanic.Name] = new ToggleNode(false);
+            }
         }
 
         private void DrawDebugSettings(AtlasBiomeSettings s)
@@ -331,7 +432,9 @@ namespace AtlasBiomeHighlighter
             { bool v = s.DebugMode.Value; if (ImGui.Checkbox("Debug mode", ref v)) s.DebugMode.Value = v; }
             { bool v = s.DebugPreferredMaps.Value; if (ImGui.Checkbox("Debug Preferred map hits to file", ref v)) s.DebugPreferredMaps.Value = v; }
             { bool v = s.DebugPreferredDetails.Value; if (ImGui.Checkbox("Debug include reflected node details", ref v)) s.DebugPreferredDetails.Value = v; }
-            ImGui.TextDisabled("Debug log: plugin folder / AtlasBiomeHighlighter.PreferredDebug.log");
+            { bool v = s.DebugNavigationTargets.Value; if (ImGui.Checkbox("Debug navigation targets / arrows", ref v)) s.DebugNavigationTargets.Value = v; }
+            ImGui.TextDisabled("Debug logs: AtlasBiomeHighlighter.PreferredDebug.log / NavigationDebug.log / JumpTrace.txt");
+            ImGui.TextDisabled("Spike profiler log: AtlasBiomeHighlighter.PerformanceSpikes.txt");
 
             ImGui.Separator();
             ImGui.TextDisabled("Performance diagnostics");
@@ -356,6 +459,198 @@ namespace AtlasBiomeHighlighter
             ImGui.Unindent();
         }
 
+
+        private static readonly Keys[] PreferredGuideCaptureKeys =
+        {
+            Keys.Back, Keys.Tab, Keys.Enter, Keys.Pause, Keys.CapsLock,
+            Keys.Space, Keys.PageUp, Keys.PageDown, Keys.End, Keys.Home,
+            Keys.Left, Keys.Up, Keys.Right, Keys.Down,
+            Keys.Insert, Keys.Delete,
+            Keys.D0, Keys.D1, Keys.D2, Keys.D3, Keys.D4, Keys.D5, Keys.D6, Keys.D7, Keys.D8, Keys.D9,
+            Keys.A, Keys.B, Keys.C, Keys.D, Keys.E, Keys.F, Keys.G, Keys.H, Keys.I, Keys.J, Keys.K, Keys.L, Keys.M,
+            Keys.N, Keys.O, Keys.P, Keys.Q, Keys.R, Keys.S, Keys.T, Keys.U, Keys.V, Keys.W, Keys.X, Keys.Y, Keys.Z,
+            Keys.NumPad0, Keys.NumPad1, Keys.NumPad2, Keys.NumPad3, Keys.NumPad4,
+            Keys.NumPad5, Keys.NumPad6, Keys.NumPad7, Keys.NumPad8, Keys.NumPad9,
+            Keys.Multiply, Keys.Add, Keys.Subtract, Keys.Decimal, Keys.Divide,
+            Keys.F1, Keys.F2, Keys.F3, Keys.F4, Keys.F5, Keys.F6, Keys.F7, Keys.F8, Keys.F9, Keys.F10, Keys.F11, Keys.F12,
+            Keys.OemSemicolon, Keys.Oemplus, Keys.Oemcomma, Keys.OemMinus, Keys.OemPeriod, Keys.OemQuestion,
+            Keys.Oemtilde, Keys.OemOpenBrackets, Keys.OemPipe, Keys.OemCloseBrackets, Keys.OemQuotes
+        };
+
+
+        private void DrawWaypointHotkeySelector(string label, HotkeyNode hotkey, string popupId, string hint)
+        {
+            var current = hotkey.Value;
+            var preview = current == Keys.None ? "Disabled" : current.ToString();
+
+            bool requestOpen = false;
+            ImGui.PushID(popupId);
+
+            
+            if (ImGui.BeginTable("##WaypointHotkeyRow", 3, ImGuiTableFlags.SizingFixedFit))
+            {
+                ImGui.TableSetupColumn("label", ImGuiTableColumnFlags.WidthFixed, 270f);
+                ImGui.TableSetupColumn("button", ImGuiTableColumnFlags.WidthFixed, 112f);
+                ImGui.TableSetupColumn("hint", ImGuiTableColumnFlags.WidthStretch);
+
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted(label);
+
+                ImGui.TableSetColumnIndex(1);
+                if (ImGui.Button($"{preview}##WaypointCaptureButton", new Vector2(104f, 0f)))
+                {
+                    _capturingWaypointHotkey = true;
+                    _capturingWaypointHotkeyNode = hotkey;
+                    _capturingWaypointHotkeyLabel = label;
+                    requestOpen = true;
+                }
+
+                ImGui.TableSetColumnIndex(2);
+                if (!string.IsNullOrWhiteSpace(hint))
+                {
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.TextDisabled(hint);
+                }
+
+                ImGui.EndTable();
+            }
+
+            ImGui.PopID();
+
+            
+            if (requestOpen)
+                ImGui.OpenPopup("WaypointHotkeyCapturePopup");
+        }
+
+        private void DrawWaypointHotkeyCapturePopup()
+        {
+            if (ImGui.BeginPopup("WaypointHotkeyCapturePopup"))
+            {
+                var label = string.IsNullOrWhiteSpace(_capturingWaypointHotkeyLabel)
+                    ? "waypoint action"
+                    : _capturingWaypointHotkeyLabel;
+
+                ImGui.Text($"Press new key for {label}.");
+                ImGui.TextDisabled("Esc = cancel");
+
+                if (ImGui.Button("Clear"))
+                {
+                    if (_capturingWaypointHotkeyNode != null)
+                        _capturingWaypointHotkeyNode.Value = Keys.None;
+
+                    _capturingWaypointHotkey = false;
+                    _capturingWaypointHotkeyNode = null;
+                    _capturingWaypointHotkeyLabel = string.Empty;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel"))
+                {
+                    _capturingWaypointHotkey = false;
+                    _capturingWaypointHotkeyNode = null;
+                    _capturingWaypointHotkeyLabel = string.Empty;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                if (IsKeyPressedOnce(Keys.Escape))
+                {
+                    _capturingWaypointHotkey = false;
+                    _capturingWaypointHotkeyNode = null;
+                    _capturingWaypointHotkeyLabel = string.Empty;
+                    ImGui.CloseCurrentPopup();
+                }
+                else if (_capturingWaypointHotkeyNode != null)
+                {
+                    foreach (var key in PreferredGuideCaptureKeys)
+                    {
+                        if (!IsKeyPressedOnce(key))
+                            continue;
+
+                        _capturingWaypointHotkeyNode.Value = key;
+                        _capturingWaypointHotkey = false;
+                        _capturingWaypointHotkeyNode = null;
+                        _capturingWaypointHotkeyLabel = string.Empty;
+                        ImGui.CloseCurrentPopup();
+                        break;
+                    }
+                }
+
+                ImGui.EndPopup();
+            }
+            else if (_capturingWaypointHotkey)
+            {
+                
+                _capturingWaypointHotkey = false;
+                _capturingWaypointHotkeyNode = null;
+                _capturingWaypointHotkeyLabel = string.Empty;
+            }
+        }
+
+        private void DrawPreferredGuideHotkeySelector(AtlasBiomeSettings s)
+        {
+            var current = s.PreferredGuideLinesToggleHotkey.Value;
+            var preview = current == Keys.None ? "Disabled" : current.ToString();
+
+            ImGui.SetNextItemWidth(180);
+            if (ImGui.Button($"{preview}##PreferredGuideCaptureButton"))
+            {
+                _capturingPreferredGuideHotkey = true;
+                ImGui.OpenPopup("PreferredGuideHotkeyCapturePopup");
+            }
+
+            ImGui.SameLine();
+            ImGui.TextDisabled("click, then press a key to toggle only arrows/guide lines");
+
+            if (ImGui.BeginPopup("PreferredGuideHotkeyCapturePopup"))
+            {
+                ImGui.Text("Press new key for Preferred guide arrows.");
+                ImGui.TextDisabled("Esc = cancel");
+
+                if (ImGui.Button("Clear"))
+                {
+                    s.PreferredGuideLinesToggleHotkey.Value = Keys.None;
+                    _capturingPreferredGuideHotkey = false;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel"))
+                {
+                    _capturingPreferredGuideHotkey = false;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                if (IsKeyPressedOnce(Keys.Escape))
+                {
+                    _capturingPreferredGuideHotkey = false;
+                    ImGui.CloseCurrentPopup();
+                }
+                else
+                {
+                    foreach (var key in PreferredGuideCaptureKeys)
+                    {
+                        if (!IsKeyPressedOnce(key))
+                            continue;
+
+                        s.PreferredGuideLinesToggleHotkey.Value = key;
+                        _capturingPreferredGuideHotkey = false;
+                        ImGui.CloseCurrentPopup();
+                        break;
+                    }
+                }
+
+                ImGui.EndPopup();
+            }
+            else
+            {
+                _capturingPreferredGuideHotkey = false;
+            }
+        }
+
         private void DrawPreferredCategory(string label, PreferredMapGroup activeGroup, System.Func<string, bool> predicate)
         {
             var keys = Settings.PreferredMaps.Keys
@@ -378,6 +673,36 @@ namespace AtlasBiomeHighlighter
                 {
                     if (on) activeGroup.Maps.Add(key);
                     else activeGroup.Maps.Remove(key);
+                }
+            }
+            ImGui.Unindent();
+        }
+
+        private void DrawPreferredMechanicsCategory(string label, PreferredMapGroup activeGroup)
+        {
+            activeGroup.Mechanics ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var keys = Utility.MapContentMechanics
+                .Select(m => m.Name)
+                .Where(k => string.IsNullOrEmpty(_preferredFilter) || k.IndexOf(_preferredFilter, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderBy(k => k, System.StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (keys.Length == 0)
+                return;
+
+            if (!ImGui.CollapsingHeader($"{label} ({keys.Length})"))
+                return;
+
+            ImGui.Indent();
+            ImGui.TextDisabled("Uses the same fast Map Content cache as Special Highlights.");
+            foreach (var key in keys)
+            {
+                bool on = activeGroup.Mechanics.Contains(key);
+                if (ImGui.Checkbox($"{key}##preferred_mechanic_{key}", ref on))
+                {
+                    if (on) activeGroup.Mechanics.Add(key);
+                    else activeGroup.Mechanics.Remove(key);
                 }
             }
             ImGui.Unindent();

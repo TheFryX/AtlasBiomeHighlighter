@@ -21,21 +21,21 @@ namespace AtlasBiomeHighlighter
         private readonly Stopwatch _atlasRefreshSw = new();
         private readonly Stopwatch _screenRefreshSw = new();
 
-        // Viewport size used for on-screen checks and off-screen guide clamping.
-        // Auto-detected each refresh; user can override via settings (BorderX/BorderY).
+        
+        
         private int _viewportWidth;
         private int _viewportHeight;
 
         private void UpdateViewportSize()
         {
-            // Settings overrides take precedence.
+            
             int w = Settings.BorderX?.Value ?? 0;
             int h = Settings.BorderY?.Value ?? 0;
 
             if (w <= 0 || h <= 0)
             {
-                // Dear ImGui IO size is the most reliable cross-mode measure available in ExileCore overlays.
-                // It matches the overlay draw-space and tracks windowed ultrawide correctly.
+                
+                
                 var ds = ImGui.GetIO().DisplaySize;
                 int autoW = (int)ds.X;
                 int autoH = (int)ds.Y;
@@ -44,7 +44,7 @@ namespace AtlasBiomeHighlighter
                 if (h <= 0) h = autoH;
             }
 
-            // Sanity fallback to prevent division by zero / invalid rects.
+            
             if (w <= 0) w = 1920;
             if (h <= 0) h = 1080;
 
@@ -55,16 +55,21 @@ namespace AtlasBiomeHighlighter
         private int BorderX => _viewportWidth > 0 ? _viewportWidth : 1920;
         private int BorderY => _viewportHeight > 0 ? _viewportHeight : 1080;
 
-        // ===== Preferred maps matching caches =====
-        // Keep Render() hot-path allocation-free by caching enabled PreferredMaps tokens.
+        
+        
         private int _preferredCacheHash;
         private string[] _preferredTokensList = Array.Empty<string>();
         private HashSet<string> _preferredTokensExact = new(StringComparer.Ordinal);
 
-        // Maps a normalized preferred token to a cached tag label (e.g. "[Preferred Savannah]").
+        
+        
+        private string[] _preferredMechanicTokensList = Array.Empty<string>();
+        private HashSet<string> _preferredMechanicTokensExact = new(StringComparer.Ordinal);
+
+        
         private readonly Dictionary<string, string> _preferredTokenToTag = new(StringComparer.Ordinal);
 
-        // Cache normalized node tokens by Atlas UI element address.
+        
         private readonly Dictionary<long, NodeTokenCache> _nodeTokenCache = new(512);
         private int _nodeTokenCacheFrame;
         private const int NodeTokenCacheMaxEntries = 4096;
@@ -134,7 +139,7 @@ namespace AtlasBiomeHighlighter
             }
             catch
             {
-                // Debug must never break rendering.
+                
             }
         }
 
@@ -242,8 +247,8 @@ namespace AtlasBiomeHighlighter
 
         private void MigratePreferredGroupsIfNeeded()
         {
-            // Backwards compatibility: older configs stored preferred selection in PreferredMaps (ToggleNodes).
-            // Newer configs store selections inside PreferredMapGroups.
+            
+            
             if (Settings.PreferredMapGroups != null && Settings.PreferredMapGroups.Count > 0)
                 return;
 
@@ -255,7 +260,7 @@ namespace AtlasBiomeHighlighter
             }
 
             Settings.PreferredMapGroups = new List<PreferredMapGroup> { g };
-            // Leave the old toggles as-is (for users who downgrade), but logic will use groups.
+            
         }
 
         private void ResetAtlasCache()
@@ -269,7 +274,7 @@ namespace AtlasBiomeHighlighter
 
         private void EnsurePreferredCacheUpToDate()
         {
-            // Compute a stable hash of enabled group selections.
+            
             int h = 17;
             int enabledCount = 0;
             var groups = Settings.PreferredMapGroups;
@@ -284,6 +289,14 @@ namespace AtlasBiomeHighlighter
                         enabledCount++;
                         h = unchecked(h * 31 + StringComparer.OrdinalIgnoreCase.GetHashCode(key));
                     }
+                    if (g.Mechanics != null)
+                    {
+                        foreach (var key in g.Mechanics)
+                        {
+                            enabledCount++;
+                            h = unchecked(h * 31 + StringComparer.OrdinalIgnoreCase.GetHashCode("mechanic:" + key));
+                        }
+                    }
                 }
             }
             h = unchecked(h * 31 + enabledCount);
@@ -291,10 +304,12 @@ namespace AtlasBiomeHighlighter
             if (h == _preferredCacheHash) return;
             _preferredCacheHash = h;
 
-            // Rebuild caches with minimal allocations.
+            
             _preferredTokensExact.Clear();
+            _preferredMechanicTokensExact.Clear();
             _preferredTokenToTag.Clear();
             var list = new List<string>(enabledCount);
+            var mechanicList = new List<string>(enabledCount);
             if (groups != null)
             {
                 for (int gi = 0; gi < groups.Count; gi++)
@@ -309,7 +324,7 @@ namespace AtlasBiomeHighlighter
                         if (_preferredTokensExact.Add(token))
                         {
                             list.Add(token);
-                            // Cache display tag for labels (uses the first enabled occurrence).
+                            
                             var display = Utility.PreferredKeyToDisplayName(key);
                             _preferredTokenToTag[token] = display.Length == 0 ? "[Preferred]" : $"[Preferred {display}]";
                         }
@@ -319,9 +334,29 @@ namespace AtlasBiomeHighlighter
                             _preferredTokenToTag[token] = display.Length == 0 ? "[Preferred]" : $"[Preferred {display}]";
                         }
                     }
+
+                    if (g.Mechanics != null)
+                    {
+                        foreach (var key in g.Mechanics)
+                        {
+                            var token = Utility.NormalizeToken(key);
+                            if (token.Length == 0) continue;
+
+                            if (_preferredMechanicTokensExact.Add(token))
+                            {
+                                mechanicList.Add(token);
+                                _preferredTokenToTag[token] = $"[Preferred {key}]";
+                            }
+                            else if (!_preferredTokenToTag.ContainsKey(token))
+                            {
+                                _preferredTokenToTag[token] = $"[Preferred {key}]";
+                            }
+                        }
+                    }
                 }
             }
             _preferredTokensList = list.Count == 0 ? Array.Empty<string>() : list.ToArray();
+            _preferredMechanicTokensList = mechanicList.Count == 0 ? Array.Empty<string>() : mechanicList.ToArray();
         }
 
         private string GetPreferredTag(string? matchedToken)
@@ -339,7 +374,7 @@ namespace AtlasBiomeHighlighter
             var elem = nd.Element;
             if (elem is null) return false;
 
-            // Element.Address is stable for the lifetime of the UI element.
+            
             long addr = elem.Address;
             _nodeTokenCacheFrame++;
 
@@ -347,12 +382,12 @@ namespace AtlasBiomeHighlighter
             {
                 nameToken = cached.NameToken;
                 idToken = cached.IdToken;
-                // Refresh entry (struct is immutable; overwrite).
+                
                 _nodeTokenCache[addr] = new NodeTokenCache(nameToken, idToken, _nodeTokenCacheFrame);
                 return nameToken.Length != 0 || idToken.Length != 0;
             }
 
-            // Build tokens once.
+            
             if (Utility.TryGetAnyMapName(nd, out var anyName) && !string.IsNullOrWhiteSpace(anyName))
                 nameToken = Utility.NormalizeToken(anyName);
 
@@ -361,8 +396,8 @@ namespace AtlasBiomeHighlighter
 
             if (_nodeTokenCache.Count >= NodeTokenCacheMaxEntries)
             {
-                // Opportunistic prune: remove old entries.
-                // This keeps worst-case bounded without extra timers.
+                
+                
                 var cutoff = _nodeTokenCacheFrame - 1024;
                 var toRemove = new List<long>(64);
                 foreach (var kv in _nodeTokenCache)
@@ -384,18 +419,21 @@ namespace AtlasBiomeHighlighter
             _atlasPanel = GameController?.IngameState?.IngameUi?.WorldMap?.AtlasPanel;
             if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
 
-            // Hotkeys must be polled every frame; users can tap keys faster than ScreenRefreshMs.
-            // Keep the handler lightweight: it only does node picking when a key edge is detected.
+            
+            
             HandleHotkeys();
 
-            // Keep viewport dimensions up-to-date (ultrawide/windowed changes).
+            
             UpdateViewportSize();
 
-            // Preferred guide discovery is time-sliced. Never scan the whole atlas from Render().
+            
             using (ProfileScope("Preferred guide discovery"))
             {
                 UpdatePreferredGuideDiscovery();
             }
+
+            
+            TickNavigationCoordStabilityDebug();
 
             if (_atlasRefreshSw.ElapsedMilliseconds > Settings.AtlasRefreshMs.Value)
             {
@@ -403,7 +441,7 @@ namespace AtlasBiomeHighlighter
                 ResetVisibleCacheBuild();
                 _atlasRefreshSw.Restart();
 
-                // Rebuild graph caches (connections/waypoints/pathfinding) on atlas refresh.
+                
                 using (ProfileScope("Refresh graph caches"))
                 {
                     RefreshGraphCaches();
@@ -411,24 +449,24 @@ namespace AtlasBiomeHighlighter
                 }
             }
 
-            // Stage2b: keep map-name labels responsive while preserving time-sliced cache rebuilds.
-            // User setting remains respected when it is lower; otherwise cap effective latency for visible labels.
+            
+            
             int effectiveScreenRefreshMs = Settings.ShowLabels.Value
                 ? Math.Min(Settings.ScreenRefreshMs.Value, 250)
                 : Settings.ScreenRefreshMs.Value;
 
             if (_visibleCacheBuildInProgress || _screenRefreshSw.ElapsedMilliseconds > effectiveScreenRefreshMs)
             {
-                // Prune token cache when atlas nodes change noticeably.
-                // This is cheap and prevents cache growth across atlas refreshes.
+                
+                
                 if (_nodeTokenCacheFrame > 10_000)
                 {
                     _nodeTokenCacheFrame = 0;
                     _nodeTokenCache.Clear();
                 }
 
-                // Stage2: visibility/status cache rebuild is incremental.
-                // Render keeps using the last completed cache while this pass is still building.
+                
+                
                 bool visibleCachesReady;
                 using (ProfileScope("Rebuild visible caches"))
                 {
@@ -437,7 +475,7 @@ namespace AtlasBiomeHighlighter
 
                 if (visibleCachesReady)
                 {
-                    // Hover-learned tooltip stats and path recomputation are safe to throttle.
+                    
                     using (ProfileScope("Recompute shortest path"))
                     {
                         RecomputeShortestPathIfNeeded();
