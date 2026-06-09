@@ -137,6 +137,8 @@ namespace AtlasBiomeHighlighter
             ["Map Area Modified"] = new(false),
             ["Fleeing Exile"] = new(false),
             ["Breach Hive"] = new(false),
+            ["Delirium"] = new(false),
+            ["Grand Mirror"] = new(false),
             ["Simulacrum"] = new(false),
             ["Chaotic Cacophony"] = new(false),
             ["Affluent Armies"] = new(false),

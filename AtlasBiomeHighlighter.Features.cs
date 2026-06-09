@@ -55,6 +55,8 @@ namespace AtlasBiomeHighlighter
         
         private string _atlasSearch = string.Empty;
         private string _mechanicSearch = string.Empty;
+        private int _navigatorMinSteps;
+        private int _navigatorMaxSteps;
 
         private const int WaypointAtlasBuildBudgetPerFrame = 32;
 
@@ -2156,9 +2158,13 @@ namespace AtlasBiomeHighlighter
                 }
             }
 
-            Seed(n => n.Visited || n.Unlocked);
+            
+            
+            Seed(n => n.Visited);
             if (q.Count == 0)
                 Seed(n => n.Active);
+            if (q.Count == 0)
+                Seed(n => n.Unlocked);
 
             while (q.Count > 0)
             {
@@ -2209,11 +2215,13 @@ namespace AtlasBiomeHighlighter
                 }
             }
 
-            Seed(n => n.Visited || n.Unlocked);
-
             
+            Seed(n => n.Visited);
+
             if (q.Count == 0)
                 Seed(n => n.Active);
+            if (q.Count == 0)
+                Seed(n => n.Unlocked);
 
             while (q.Count > 0)
             {

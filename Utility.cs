@@ -317,6 +317,8 @@ namespace AtlasBiomeHighlighter
             new("Map Area Modified", "Map Area Modified", "Mapnode", "MapAreaModified"),
             new("Fleeing Exile", "Fleeing Exile", "AnarchyNotable2", "FleeingExile"),
             new("Breach Hive", "Breach Hive", "BreachNotable4", "BreachHive"),
+            new("Delirium", "Delirium", "AtlasIconContentDelirium", "DeliriumMirror", "DeliriumEncounter"),
+            new("Grand Mirror", "Grand Mirror", "DeliriumGigaMirror", "GrandMirror", "GigaMirror"),
             new("Simulacrum", "Simulacrum", "DeliriumNotable7"),
             new("Chaotic Cacophony", "Chaotic Cacophony", "ElderShaperNotable1", "ChaoticCacophony"),
             new("Affluent Armies", "Affluent Armies", "ItemRarity", "BossMapDrops", "AffluentArmies"),

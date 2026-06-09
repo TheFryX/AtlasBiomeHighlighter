@@ -646,11 +646,11 @@ namespace AtlasBiomeHighlighter
                 }
                 if (float.IsFinite(t)) edge = centerScreen + dir * t;
 
-                var back = edge - dir * 20f;
+                var back = edge - dir * 24f;
                 var perp = new Vector2(-dir.Y, dir.X);
                 var p1 = edge;
-                var p2 = back + perp * 10f;
-                var p3 = back - perp * 10f;
+                var p2 = back + perp * 12f;
+                var p3 = back - perp * 12f;
 
                 DrawTriangleFilled(p1, p2, p3, colorArrow);
 			}
@@ -1206,8 +1206,7 @@ namespace AtlasBiomeHighlighter
             int processed = 0;
 
             while (_waypointAtlasBuildIndex < _atlasNodes.Length &&
-                   processed < WaypointAtlasBuildBudgetPerFrame &&
-                   _waypointAtlasRows.Count < maxItems)
+                   processed < WaypointAtlasBuildBudgetPerFrame)
             {
                 var nd = _atlasNodes[_waypointAtlasBuildIndex++];
                 processed++;
@@ -1238,8 +1237,11 @@ namespace AtlasBiomeHighlighter
                 _waypointAtlasRows.Add(new WaypointAtlasRow(nd, mapName, Utility.TryGetBiome(nd).ToString(), coord.X, coord.Y));
             }
 
-            if (_waypointAtlasBuildIndex >= _atlasNodes.Length || _waypointAtlasRows.Count >= maxItems)
+            if (_waypointAtlasBuildIndex >= _atlasNodes.Length)
+            {
+                SortWaypointAtlasRowsBySteps();
                 _waypointAtlasBuildActive = false;
+            }
         }
 
         private void ProcessWaypointMechanicCacheBudget()
@@ -1256,8 +1258,7 @@ namespace AtlasBiomeHighlighter
             int processed = 0;
 
             while (_waypointMechanicBuildIndex < _atlasNodes.Length &&
-                   processed < WaypointAtlasBuildBudgetPerFrame &&
-                   _waypointMechanicRows.Count < maxItems)
+                   processed < WaypointAtlasBuildBudgetPerFrame)
             {
                 var nd = _atlasNodes[_waypointMechanicBuildIndex++];
                 processed++;
@@ -1298,8 +1299,95 @@ namespace AtlasBiomeHighlighter
                 _waypointMechanicRows.Add(new WaypointMechanicRow(nd, mapName, mechanicText, Utility.TryGetBiome(nd).ToString(), coord.X, coord.Y));
             }
 
-            if (_waypointMechanicBuildIndex >= _atlasNodes.Length || _waypointMechanicRows.Count >= maxItems)
+            if (_waypointMechanicBuildIndex >= _atlasNodes.Length)
+            {
+                SortWaypointMechanicRowsBySteps();
                 _waypointMechanicBuildActive = false;
+            }
+        }
+
+
+        private void SortWaypointAtlasRowsBySteps()
+        {
+            _waypointAtlasRows.Sort((a, b) => CompareAtlasNavigatorRows(a.X, a.Y, a.Name, b.X, b.Y, b.Name));
+        }
+
+        private void SortWaypointMechanicRowsBySteps()
+        {
+            _waypointMechanicRows.Sort((a, b) => CompareAtlasNavigatorRows(a.X, a.Y, a.MapName, b.X, b.Y, b.MapName));
+        }
+
+        private int CompareAtlasNavigatorRows(int ax, int ay, string aName, int bx, int by, string bName)
+        {
+            bool hasA = TryGetAtlasRouteSteps(ax, ay, out var aSteps);
+            bool hasB = TryGetAtlasRouteSteps(bx, by, out var bSteps);
+
+            if (hasA && hasB)
+            {
+                int bySteps = aSteps.CompareTo(bSteps);
+                if (bySteps != 0) return bySteps;
+            }
+            else if (hasA)
+            {
+                return -1;
+            }
+            else if (hasB)
+            {
+                return 1;
+            }
+
+            int byName = string.Compare(aName, bName, StringComparison.OrdinalIgnoreCase);
+            if (byName != 0) return byName;
+
+            int byX = ax.CompareTo(bx);
+            return byX != 0 ? byX : ay.CompareTo(by);
+        }
+
+        private bool PassesNavigatorStepsFilter(int x, int y, out int steps)
+        {
+            bool hasSteps = TryGetAtlasRouteSteps(x, y, out steps);
+            int minSteps = Math.Max(0, _navigatorMinSteps);
+            int maxSteps = Math.Max(0, _navigatorMaxSteps);
+
+            
+            if (minSteps == 0 && maxSteps == 0)
+                return true;
+
+            if (!hasSteps)
+                return false;
+
+            if (steps < minSteps)
+                return false;
+
+            return maxSteps == 0 || steps <= maxSteps;
+        }
+
+        private void DrawNavigatorStepsFilterControls(string idSuffix)
+        {
+            ImGuiNET.ImGui.Text("Steps:");
+            ImGuiNET.ImGui.SameLine();
+            ImGuiNET.ImGui.TextDisabled("min");
+            ImGuiNET.ImGui.SameLine();
+            ImGuiNET.ImGui.SetNextItemWidth(48);
+            if (ImGuiNET.ImGui.InputInt($"##steps_min_{idSuffix}", ref _navigatorMinSteps, 0, 0))
+                _navigatorMinSteps = Math.Clamp(_navigatorMinSteps, 0, 999);
+
+            ImGuiNET.ImGui.SameLine();
+            ImGuiNET.ImGui.TextDisabled("max");
+            ImGuiNET.ImGui.SameLine();
+            ImGuiNET.ImGui.SetNextItemWidth(48);
+            if (ImGuiNET.ImGui.InputInt($"##steps_max_{idSuffix}", ref _navigatorMaxSteps, 0, 0))
+                _navigatorMaxSteps = Math.Clamp(_navigatorMaxSteps, 0, 999);
+
+            ImGuiNET.ImGui.SameLine();
+            if (ImGuiNET.ImGui.SmallButton($"Clear##steps_clear_{idSuffix}"))
+            {
+                _navigatorMinSteps = 0;
+                _navigatorMaxSteps = 0;
+            }
+
+            if (ImGuiNET.ImGui.IsItemHovered())
+                ImGuiNET.ImGui.SetTooltip("0 / 0 disables the Steps filter. Max = 0 means no upper limit.");
         }
 
         private void RenderWaypointPanel()
@@ -1379,7 +1467,7 @@ namespace AtlasBiomeHighlighter
             var wpsAvail = ImGuiNET.ImGui.GetContentRegionAvail();
             var wpsTableH = Math.Min(Math.Max(140f, ImGuiNET.ImGui.GetTextLineHeightWithSpacing() * 10f), Math.Max(160f, wpsAvail.Y * 0.35f));
 
-            int waypointColumnCount = _waypointPanelAdvancedMode ? 7 : 6;
+            int waypointColumnCount = _waypointPanelAdvancedMode ? 8 : 7;
             if (ImGuiNET.ImGui.BeginTable("##wps", waypointColumnCount, wpsTableFlags, new Vector2(0, wpsTableH)))
             {
                 using var waypointListProfile = ProfileScope("Render waypoint panel saved list");
@@ -1389,6 +1477,7 @@ namespace AtlasBiomeHighlighter
                 ImGuiNET.ImGui.TableSetupColumn("Map", ImGuiNET.ImGuiTableColumnFlags.WidthStretch);
                 if (_waypointPanelAdvancedMode)
                     ImGuiNET.ImGui.TableSetupColumn("Coord", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 80);
+                ImGuiNET.ImGui.TableSetupColumn("Steps", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
                 ImGuiNET.ImGui.TableSetupColumn("Jump", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 58);
                 ImGuiNET.ImGui.TableSetupColumn("Remove", ImGuiNET.ImGuiTableColumnFlags.WidthFixed, 62);
                 ImGuiNET.ImGui.TableHeadersRow();
@@ -1452,6 +1541,12 @@ namespace AtlasBiomeHighlighter
                         ImGuiNET.ImGui.Text($"{wp.X},{wp.Y}");
                     }
 
+                    ImGuiNET.ImGui.TableNextColumn();
+                    if (TryGetAtlasRouteSteps(wp.X, wp.Y, out var waypointSteps))
+                        ImGuiNET.ImGui.TextUnformatted(waypointSteps.ToString());
+                    else
+                        ImGuiNET.ImGui.TextDisabled("-");
+
                     
                     ImGuiNET.ImGui.TableNextColumn();
                     if (ImGuiNET.ImGui.SmallButton((Settings.WaypointJumpEnabled.Value ? "Jump" : "Jump off") + $"##wpjump_{i}"))
@@ -1489,7 +1584,7 @@ namespace AtlasBiomeHighlighter
                 ImGuiNET.ImGui.AlignTextToFramePadding();
                 ImGuiNET.ImGui.Text("Sort:");
                 ImGuiNET.ImGui.SameLine();
-                ImGuiNET.ImGui.TextDisabled("Name");
+                ImGuiNET.ImGui.TextDisabled("Steps");
 
                 ImGuiNET.ImGui.SameLine();
                 ImGuiNET.ImGui.Dummy(new Vector2(12, 0));
@@ -1525,6 +1620,8 @@ namespace AtlasBiomeHighlighter
                 ImGuiNET.ImGui.SetNextItemWidth(searchWidth);
                 ImGuiNET.ImGui.InputText("##search", ref _atlasSearch, 64);
 
+                DrawNavigatorStepsFilterControls("atlas");
+
                 ImGuiNET.ImGui.Spacing();
 
                 
@@ -1555,6 +1652,8 @@ namespace AtlasBiomeHighlighter
                     ImGuiNET.ImGui.TableHeadersRow();
 
                     ProcessWaypointAtlasCacheBudget();
+                    if (!_waypointAtlasBuildActive)
+                        SortWaypointAtlasRowsBySteps();
 
                     if (_waypointAtlasBuildActive)
                     {
@@ -1581,9 +1680,14 @@ namespace AtlasBiomeHighlighter
                         ImGuiNET.ImGui.TextDisabled("...");
                     }
 
-                    for (int i = 0; i < _waypointAtlasRows.Count; i++)
+                    int atlasRowsDrawn = 0;
+                    for (int i = 0; i < _waypointAtlasRows.Count && atlasRowsDrawn < Settings.WaypointAtlasMaxItems.Value; i++)
                     {
                         var row = _waypointAtlasRows[i];
+                        if (!PassesNavigatorStepsFilter(row.X, row.Y, out _))
+                            continue;
+
+                        atlasRowsDrawn++;
                         bool hasWp = false;
                         for (int wi = 0; wi < wps.Count; wi++)
                         {
@@ -1663,7 +1767,7 @@ namespace AtlasBiomeHighlighter
                 ImGuiNET.ImGui.AlignTextToFramePadding();
                 ImGuiNET.ImGui.Text("Sort:");
                 ImGuiNET.ImGui.SameLine();
-                ImGuiNET.ImGui.TextDisabled("Mechanic");
+                ImGuiNET.ImGui.TextDisabled("Steps");
 
                 ImGuiNET.ImGui.SameLine();
                 ImGuiNET.ImGui.Dummy(new Vector2(12, 0));
@@ -1696,6 +1800,8 @@ namespace AtlasBiomeHighlighter
                 ImGuiNET.ImGui.SetNextItemWidth(mechanicSearchWidth);
                 ImGuiNET.ImGui.InputText("##mechanic_search", ref _mechanicSearch, 64);
 
+                DrawNavigatorStepsFilterControls("mechanic");
+
                 ImGuiNET.ImGui.Spacing();
 
                     var mechanicFlags =
@@ -1726,6 +1832,8 @@ namespace AtlasBiomeHighlighter
                         ImGuiNET.ImGui.TableHeadersRow();
 
                         ProcessWaypointMechanicCacheBudget();
+                        if (!_waypointMechanicBuildActive)
+                            SortWaypointMechanicRowsBySteps();
 
                         if (_waypointMechanicBuildActive)
                         {
@@ -1754,9 +1862,14 @@ namespace AtlasBiomeHighlighter
                             ImGuiNET.ImGui.TextDisabled("...");
                         }
 
-                        for (int i = 0; i < _waypointMechanicRows.Count; i++)
+                        int mechanicRowsDrawn = 0;
+                        for (int i = 0; i < _waypointMechanicRows.Count && mechanicRowsDrawn < Settings.WaypointAtlasMaxItems.Value; i++)
                         {
                             var row = _waypointMechanicRows[i];
+                            if (!PassesNavigatorStepsFilter(row.X, row.Y, out _))
+                                continue;
+
+                            mechanicRowsDrawn++;
                             bool hasWp = false;
                             for (int wi = 0; wi < wps.Count; wi++)
                             {
