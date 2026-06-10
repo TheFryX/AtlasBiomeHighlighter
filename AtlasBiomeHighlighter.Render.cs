@@ -105,6 +105,7 @@ namespace AtlasBiomeHighlighter
             long renderNodeTotalTicks = 0;
 
             bool anyMechanicHighlightsEnabled = HasAnyMechanicHighlightEnabled();
+            bool anyTowerHighlightsEnabled = HasAnyTowerHighlightEnabled();
 
             using (ProfileScope("Render node overlays"))
             {
@@ -130,8 +131,11 @@ namespace AtlasBiomeHighlighter
 
                 var mechanicNames = info.MechanicNames;
                 bool mechanicWanted = anyMechanicHighlightsEnabled && IsAnyMechanicHighlightEnabled(mechanicNames);
+                string? highlightedTowerName = null;
+                bool towerWanted = anyTowerHighlightsEnabled && TryGetHighlightedTowerName(info.Node, out highlightedTowerName);
                 bool specialWanted =
                     mechanicWanted ||
+                    towerWanted ||
                     ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
                     ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0 && Settings.HighlightDeadlyBoss.Value) ||
                     ((sflags & Utility.SpecialFlags.MomentofZen) != 0 && Settings.HighlightMomentofZen.Value) ||
@@ -212,7 +216,7 @@ namespace AtlasBiomeHighlighter
                     renderOverlay = false;
 
                 int extra = 0;
-                bool nonMechanicSpecialWanted = specialWanted && !mechanicWanted;
+                bool nonMechanicSpecialWanted = specialWanted && !mechanicWanted && !towerWanted;
                 bool drawBaseRing = renderOverlay && (biomeVisible || preferredWanted || nonMechanicSpecialWanted);
 
                 
@@ -270,6 +274,13 @@ namespace AtlasBiomeHighlighter
                 {
                     var c = Utility.WithOpacity(Settings.MechanicHighlightRingColor.Value, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
                     DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, MechanicCircleSegments);
+                }
+
+                if (renderOverlay && towerWanted && !string.IsNullOrWhiteSpace(highlightedTowerName))
+                {
+                    var towerColor = GetTowerHighlightColor(highlightedTowerName);
+                    var c = Utility.WithOpacity(towerColor, Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
                 }
 
                 if (profileRenderSections)
@@ -341,6 +352,7 @@ namespace AtlasBiomeHighlighter
                             if (IsMechanicHighlightEnabled(mechanicName))
                                 text += " [" + mechanicName + "]";
                         }
+                        if (towerWanted && !string.IsNullOrWhiteSpace(highlightedTowerName)) text += " [" + highlightedTowerName + "]";
                         if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
                         if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
                     }
@@ -1013,6 +1025,44 @@ namespace AtlasBiomeHighlighter
             return Settings.Colors.ContainsKey(biome);
         }
 
+        private bool HasAnyTowerHighlightEnabled()
+        {
+            if (Settings.TowerHighlights == null || Settings.TowerHighlights.Count == 0)
+                return false;
+
+            foreach (var kvp in Settings.TowerHighlights)
+            {
+                if (kvp.Value != null && kvp.Value.Value)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool TryGetHighlightedTowerName(AtlasNodeDescription nd, out string? towerName)
+        {
+            towerName = null;
+            if (Settings.TowerHighlights == null)
+                return false;
+
+            if (!Utility.TryGetTowerName(nd, out towerName) || string.IsNullOrWhiteSpace(towerName))
+                return false;
+
+            return Settings.TowerHighlights.TryGetValue(towerName, out var node) && node.Value;
+        }
+
+        private System.Drawing.Color GetTowerHighlightColor(string towerName)
+        {
+            if (Settings.TowerHighlightColors != null &&
+                Settings.TowerHighlightColors.TryGetValue(towerName, out var colorNode) &&
+                colorNode != null)
+            {
+                return colorNode.Value;
+            }
+
+            return Settings.TowerHighlightRingColor.Value;
+        }
+
         private bool HasAnyMechanicHighlightEnabled()
         {
             if (Settings.MechanicHighlights == null || Settings.MechanicHighlights.Count == 0)
@@ -1212,7 +1262,6 @@ namespace AtlasBiomeHighlighter
                 processed++;
 
                 if (nd?.Element is null) continue;
-                if (IsTower(nd.Element)) continue;
 
                 if (_waypointAtlasCachedHideCompleted && Utility.IsMapCompleted(nd))
                     continue;
@@ -1264,7 +1313,6 @@ namespace AtlasBiomeHighlighter
                 processed++;
 
                 if (nd?.Element is null) continue;
-                if (IsTower(nd.Element)) continue;
 
                 if (_waypointMechanicCachedHideCompleted && Utility.IsMapCompleted(nd))
                     continue;

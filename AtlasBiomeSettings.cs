@@ -171,6 +171,26 @@ namespace AtlasBiomeHighlighter
         };
         public ColorNode MechanicHighlightRingColor { get; set; } = new(Color.FromArgb(90, 210, 255));
 
+        public Dictionary<string, ToggleNode> TowerHighlights { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Alpine Ridge"] = new(false),
+            ["Bluff"] = new(false),
+            ["Lost Towers"] = new(false),
+            ["Mesa"] = new(false),
+            ["Precursor Tower"] = new(false),
+            ["Sinking Spire"] = new(false),
+        };
+        public ColorNode TowerHighlightRingColor { get; set; } = new(Color.FromArgb(255, 200, 80));
+        public Dictionary<string, ColorNode> TowerHighlightColors { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Alpine Ridge"] = new(Color.FromArgb(120, 220, 255)),
+            ["Bluff"] = new(Color.FromArgb(255, 210, 90)),
+            ["Lost Towers"] = new(Color.FromArgb(190, 120, 255)),
+            ["Mesa"] = new(Color.FromArgb(255, 150, 80)),
+            ["Precursor Tower"] = new(Color.FromArgb(100, 255, 160)),
+            ["Sinking Spire"] = new(Color.FromArgb(90, 180, 255)),
+        };
+
         
         public ToggleNode PreferredGuideLines { get; set; } = new(true);
         public ToggleNode PreferredGuideOnlyOffscreen { get; set; } = new(false);

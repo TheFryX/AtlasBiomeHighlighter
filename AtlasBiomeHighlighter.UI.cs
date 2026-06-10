@@ -347,6 +347,47 @@ namespace AtlasBiomeHighlighter
             DrawHighlightRow("Area contains Abysses", s.HighlightAreaContainsAbyss.Value, v => s.HighlightAreaContainsAbyss.Value = v, "AreaContainsAbyss", s.AreaContainsAbyssRingColor.Value, c => s.AreaContainsAbyssRingColor.Value = c);
             DrawHighlightRow("Area contains Expedition", s.HighlightAreaContainsExpedition.Value, v => s.HighlightAreaContainsExpedition.Value = v, "AreaContainsExpedition", s.AreaContainsExpeditionRingColor.Value, c => s.AreaContainsExpeditionRingColor.Value = c);
 
+
+            ImGui.Separator();
+            if (ImGui.CollapsingHeader("Towers", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                EnsureTowerHighlightSettings(s);
+                ImGui.Indent();
+                if (ImGui.SmallButton("On All##SpecialTowersOnAll"))
+                    SetAllTowerHighlights(s, true);
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Off All##SpecialTowersOffAll"))
+                    SetAllTowerHighlights(s, false);
+
+                ImGui.TextDisabled("Each tower has its own enable toggle and ring color.");
+
+                foreach (var tower in Utility.PreferredTowerNames)
+                {
+                    if (!s.TowerHighlights.TryGetValue(tower, out var node))
+                    {
+                        node = new ToggleNode(false);
+                        s.TowerHighlights[tower] = node;
+                    }
+
+                    if (s.TowerHighlightColors == null)
+                        s.TowerHighlightColors = new System.Collections.Generic.Dictionary<string, ColorNode>(StringComparer.OrdinalIgnoreCase);
+                    if (!s.TowerHighlightColors.TryGetValue(tower, out var colorNode))
+                    {
+                        colorNode = new ColorNode(s.TowerHighlightRingColor.Value);
+                        s.TowerHighlightColors[tower] = colorNode;
+                    }
+
+                    bool enabled = node.Value;
+                    if (ImGui.Checkbox($"{tower}##tower_{tower}", ref enabled))
+                        node.Value = enabled;
+                    ImGui.SameLine();
+                    DrawColorEdit($"Color##tower_color_{tower}", colorNode.Value, c => colorNode.Value = c, false);
+                }
+
+                ImGui.TextDisabled("Detected from atlas node Area/Id; enabled towers draw their own Special Highlight ring.");
+                ImGui.Unindent();
+            }
+
             ImGui.Separator();
             if (ImGui.CollapsingHeader("Map Content / Mechanics", ImGuiTreeNodeFlags.DefaultOpen))
             {
@@ -394,6 +435,29 @@ namespace AtlasBiomeHighlighter
             { int v = s.SpecialRingThickness.Value; if (ImGui.SliderInt("Special ring thickness", ref v, s.SpecialRingThickness.Min, s.SpecialRingThickness.Max)) s.SpecialRingThickness.Value = v; }
             { float v = s.SpecialAlphaMultiplier.Value; if (ImGui.SliderFloat("Special alpha multiplier", ref v, s.SpecialAlphaMultiplier.Min, s.SpecialAlphaMultiplier.Max)) s.SpecialAlphaMultiplier.Value = v; }
             ImGui.Unindent();
+        }
+
+        private static void SetAllTowerHighlights(AtlasBiomeSettings settings, bool enabled)
+        {
+            EnsureTowerHighlightSettings(settings);
+            foreach (var tower in Utility.PreferredTowerNames)
+                settings.TowerHighlights[tower].Value = enabled;
+        }
+
+        private static void EnsureTowerHighlightSettings(AtlasBiomeSettings s)
+        {
+            if (s.TowerHighlights == null)
+                s.TowerHighlights = new System.Collections.Generic.Dictionary<string, ToggleNode>(StringComparer.OrdinalIgnoreCase);
+            if (s.TowerHighlightColors == null)
+                s.TowerHighlightColors = new System.Collections.Generic.Dictionary<string, ColorNode>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var tower in Utility.PreferredTowerNames)
+            {
+                if (!s.TowerHighlights.ContainsKey(tower))
+                    s.TowerHighlights[tower] = new ToggleNode(false);
+                if (!s.TowerHighlightColors.ContainsKey(tower))
+                    s.TowerHighlightColors[tower] = new ColorNode(s.TowerHighlightRingColor.Value);
+            }
         }
 
         private static void SetAllMechanicHighlights(AtlasBiomeSettings settings, bool enabled)

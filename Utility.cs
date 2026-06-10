@@ -215,6 +215,16 @@ namespace AtlasBiomeHighlighter
             };
 
 
+        public static readonly string[] PreferredTowerNames =
+        {
+            "Alpine Ridge",
+            "Bluff",
+            "Lost Towers",
+            "Mesa",
+            "Precursor Tower",
+            "Sinking Spire",
+        };
+
         private static readonly System.Collections.Generic.Dictionary<string, string> TowerNamesById =
             new(System.StringComparer.OrdinalIgnoreCase)
             {
@@ -223,7 +233,48 @@ namespace AtlasBiomeHighlighter
                 ["MapMesa"] = "Mesa",
                 ["MapBluff"] = "Bluff",
                 ["MapAlpineRidge"] = "Alpine Ridge",
+                ["MapPrecursorTower"] = "Precursor Tower",
+                ["MapSinkingSpire"] = "Sinking Spire",
             };
+
+        public static bool TryGetTowerName(AtlasNodeDescription nd, out string? name)
+        {
+            name = null;
+
+            try
+            {
+                var id = ExtractString(GetMember(nd.Element, "Id")) ?? ExtractString(GetMember(GetMember(nd.Element, "Area"), "Id"));
+                if (!string.IsNullOrWhiteSpace(id) && TowerNamesById.TryGetValue(id.Trim(), out var byId))
+                {
+                    name = byId;
+                    return true;
+                }
+
+                var area = GetMember(nd.Element, "Area");
+                var areaName = ExtractString(GetMember(area, "Name"));
+                if (!string.IsNullOrWhiteSpace(areaName))
+                {
+                    foreach (var tower in PreferredTowerNames)
+                    {
+                        if (areaName.Equals(tower, StringComparison.OrdinalIgnoreCase))
+                        {
+                            name = tower;
+                            return true;
+                        }
+                    }
+
+                    if (areaName.Contains("Tower", StringComparison.OrdinalIgnoreCase) ||
+                        areaName.Equals("Sinking Spire", StringComparison.OrdinalIgnoreCase))
+                    {
+                        name = areaName.Trim();
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
 
 
         public static Biome TryGetBiome(AtlasNodeDescription nd)
