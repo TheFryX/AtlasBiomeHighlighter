@@ -28,6 +28,9 @@ namespace AtlasBiomeHighlighter
         
         public bool ShowLabel { get; set; } = true;
         public string Name { get; set; } = string.Empty;
+
+        public bool AutoFavoriteMap { get; set; }
+        public string FavoriteMapName { get; set; } = string.Empty;
     }
 
     
@@ -416,6 +419,13 @@ namespace AtlasBiomeHighlighter
         public RangeNode<int> WaypointRingThickness { get; set; } = new(3, 1, 12);
         public RangeNode<int> WaypointAtlasMaxItems { get; set; } = new(30, 5, 250);
         public ToggleNode WaypointAtlasUnlockedOnly { get; set; } = new(false);
+
+        public ToggleNode FavoriteMapsAutoTrack { get; set; } = new(true);
+        public ToggleNode FavoriteMapsRoute { get; set; } = new(true);
+        public RangeNode<int> FavoriteMapsMaxSteps { get; set; } = new(15, 1, 999);
+        public RangeNode<int> FavoriteMapsMaxAutoWaypoints { get; set; } = new(40, 1, 250);
+        public ColorNode FavoriteMapWaypointColor { get; set; } = new(Color.FromArgb(0, 220, 90));
+        public HashSet<string> FavoriteWaypointMaps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         
         

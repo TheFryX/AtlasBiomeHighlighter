@@ -55,6 +55,7 @@ namespace AtlasBiomeHighlighter
         
         private string _atlasSearch = string.Empty;
         private string _mechanicSearch = string.Empty;
+        private string _favoriteMapSearch = string.Empty;
         private int _navigatorMinSteps;
         private int _navigatorMaxSteps;
 
@@ -1913,6 +1914,11 @@ namespace AtlasBiomeHighlighter
 
         private void AddWaypoint(AtlasNodeDescription nd, string? displayName, bool route)
         {
+            AddWaypoint(nd, displayName, route, false, null, null);
+        }
+
+        private void AddWaypoint(AtlasNodeDescription nd, string? displayName, bool route, bool autoFavoriteMap, string? favoriteMapName, Color? colorOverride)
+        {
             if (!TryGetCoordinate(nd, out var c)) return;
             var wps = Settings.Waypoints;
             for (int i = 0; i < wps.Count; i++)
@@ -1920,13 +1926,58 @@ namespace AtlasBiomeHighlighter
                 if (wps[i].X != c.X || wps[i].Y != c.Y)
                     continue;
 
-                if (route)
+                var existing = wps[i];
+                bool changed = false;
+
+                if (route && (!existing.Enabled || !existing.Selected))
                 {
-                    var existing = wps[i];
                     existing.Enabled = true;
                     existing.Selected = true;
+                    changed = true;
+                }
+
+                if (autoFavoriteMap && existing.AutoFavoriteMap)
+                {
+                    var favoriteName = favoriteMapName?.Trim() ?? string.Empty;
+                    var display = !string.IsNullOrWhiteSpace(displayName) ? displayName.Trim() : favoriteName;
+                    int favoriteColor = (colorOverride ?? Settings.FavoriteMapWaypointColor.Value).ToArgb();
+
+                    if (!existing.Enabled)
+                    {
+                        existing.Enabled = true;
+                        changed = true;
+                    }
+
+                    if (!existing.ShowLabel)
+                    {
+                        existing.ShowLabel = true;
+                        changed = true;
+                    }
+
+                    if (existing.ColorArgb != favoriteColor)
+                    {
+                        existing.ColorArgb = favoriteColor;
+                        changed = true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(display) && !string.Equals(existing.Name, display, StringComparison.Ordinal))
+                    {
+                        existing.Name = display;
+                        changed = true;
+                    }
+
+                    if (!string.Equals(existing.FavoriteMapName, favoriteName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        existing.FavoriteMapName = favoriteName;
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
                     wps[i] = existing;
-                    SyncSelectedWaypoint();
+                    if (existing.Selected)
+                        SyncSelectedWaypoint();
                 }
 
                 return;
@@ -1947,6 +1998,9 @@ namespace AtlasBiomeHighlighter
 
 
             int towersCount = TryCountNearbyTowers(c);
+            var resolvedName = !string.IsNullOrWhiteSpace(displayName)
+                ? displayName.Trim()
+                : (Utility.TryGetAnyMapName(nd, out var nm) ? (nm ?? string.Empty) : string.Empty);
 
             var wp = new AtlasWaypoint
             {
@@ -1955,14 +2009,15 @@ namespace AtlasBiomeHighlighter
                 PositionX = camX,
                 PositionY = camY,
                 TowersCount = towersCount,
-                ColorArgb = Settings.DefaultWaypointColor.Value.ToArgb(),
+                ColorArgb = (colorOverride ?? Settings.DefaultWaypointColor.Value).ToArgb(),
                 
                 
                 Selected = route,
                 Enabled = true,
-                Name = !string.IsNullOrWhiteSpace(displayName)
-                    ? displayName.Trim()
-                    : (Utility.TryGetAnyMapName(nd, out var nm) ? (nm ?? string.Empty) : string.Empty)
+                ShowLabel = true,
+                Name = resolvedName,
+                AutoFavoriteMap = autoFavoriteMap,
+                FavoriteMapName = favoriteMapName?.Trim() ?? string.Empty
             };
             wps.Add(wp);
             if (route)

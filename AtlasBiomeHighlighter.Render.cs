@@ -825,7 +825,6 @@ namespace AtlasBiomeHighlighter
         {
             if (_shortestPaths.Count == 0) return;
 
-            var color = Settings.ShortestPathColor.Value;
             int thickness = Settings.ShortestPathThickness.Value;
             var io = ImGui.GetIO();
             float viewportDiagonal = MathF.Sqrt(io.DisplaySize.X * io.DisplaySize.X + io.DisplaySize.Y * io.DisplaySize.Y);
@@ -842,6 +841,8 @@ namespace AtlasBiomeHighlighter
                 var path = _shortestPaths[pathIndex];
                 if (path.Count < 2)
                     continue;
+
+                var color = GetShortestPathRenderColor(path[^1]);
 
                 Vector2 prevPos = default;
                 (int x, int y) prevCoord = default;
@@ -920,6 +921,25 @@ namespace AtlasBiomeHighlighter
                     Graphics.DrawText(label, labelPos, color);
                 }
             }
+        }
+
+        private Color GetShortestPathRenderColor((int x, int y) targetCoord)
+        {
+            var wps = Settings.Waypoints;
+            if (wps is null || wps.Count == 0)
+                return Settings.ShortestPathColor.Value;
+
+            for (int i = 0; i < wps.Count; i++)
+            {
+                var wp = wps[i];
+                if (!wp.Enabled || !wp.Selected || !wp.AutoFavoriteMap)
+                    continue;
+
+                if (wp.X == targetCoord.x && wp.Y == targetCoord.y)
+                    return Color.FromArgb(wp.ColorArgb);
+            }
+
+            return Settings.ShortestPathColor.Value;
         }
 
         private bool TryGetShortestPathScreenPosition((int x, int y) coord, float maxSaneCoordinate, out Vector2 pos)
@@ -1445,8 +1465,8 @@ namespace AtlasBiomeHighlighter
             if (!Settings.WaypointsEnabled.Value) return;
 
             
-            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(860, 560), ImGuiNET.ImGuiCond.FirstUseEver);
-            ImGuiNET.ImGui.SetNextWindowSizeConstraints(new Vector2(540, 320), new Vector2(float.MaxValue, float.MaxValue));
+            ImGuiNET.ImGui.SetNextWindowSize(new Vector2(980, 680), ImGuiNET.ImGuiCond.FirstUseEver);
+            ImGuiNET.ImGui.SetNextWindowSizeConstraints(new Vector2(680, 420), new Vector2(float.MaxValue, float.MaxValue));
 
             var flags = ImGuiNET.ImGuiWindowFlags.None;
             if (!ImGuiNET.ImGui.Begin("Atlas Navigator", ref _waypointPanelOpen, flags))
@@ -1499,7 +1519,7 @@ namespace AtlasBiomeHighlighter
                 _shortestPaths.Clear();
             }
             ImGuiNET.ImGui.SameLine();
-            ImGuiNET.ImGui.TextDisabled($"Count: {wps.Count}");
+            ImGuiNET.ImGui.TextDisabled($"Count: {wps.Count}  |  Favorite auto: {CountAutoFavoriteWaypoints()}");
 
             ImGuiNET.ImGui.Separator();
 
@@ -1513,7 +1533,12 @@ namespace AtlasBiomeHighlighter
 
             
             var wpsAvail = ImGuiNET.ImGui.GetContentRegionAvail();
-            var wpsTableH = Math.Min(Math.Max(140f, ImGuiNET.ImGui.GetTextLineHeightWithSpacing() * 10f), Math.Max(160f, wpsAvail.Y * 0.35f));
+            var rowHeight = ImGuiNET.ImGui.GetTextLineHeightWithSpacing();
+            var targetWaypointRows = Math.Clamp(wps.Count + 4, 8, 18);
+            var rowBasedWaypointHeight = rowHeight * targetWaypointRows + ImGuiNET.ImGui.GetFrameHeightWithSpacing();
+            var weightedWaypointHeight = wpsAvail.Y * 0.45f;
+            var maxWaypointHeight = Math.Max(180f, wpsAvail.Y * 0.62f);
+            var wpsTableH = Math.Clamp(Math.Max(rowBasedWaypointHeight, weightedWaypointHeight), 170f, maxWaypointHeight);
 
             int waypointColumnCount = _waypointPanelAdvancedMode ? 8 : 7;
             if (ImGuiNET.ImGui.BeginTable("##wps", waypointColumnCount, wpsTableFlags, new Vector2(0, wpsTableH)))
@@ -1625,6 +1650,9 @@ namespace AtlasBiomeHighlighter
 
 
             ImGuiNET.ImGui.Separator();
+            DrawFavoriteMapsPanel();
+
+            ImGuiNET.ImGui.Separator();
             bool showStepsColumn = Settings.DrawShortestPath.Value;
             if (ImGuiNET.ImGui.TreeNodeEx("Atlas Maps", ImGuiNET.ImGuiTreeNodeFlags.DefaultOpen))
             {
@@ -1681,7 +1709,7 @@ namespace AtlasBiomeHighlighter
                     ImGuiNET.ImGuiTableFlags.Resizable;
 
                 var atlasAvail = ImGuiNET.ImGui.GetContentRegionAvail();
-                var tableH = Math.Min(Math.Max(160f, atlasAvail.Y * 0.45f), 320f);
+                var tableH = Math.Max(180f, atlasAvail.Y);
                 int atlasColumnCount = (_waypointPanelAdvancedMode ? 6 : 4) + (showStepsColumn ? 1 : 0);
                 if (ImGuiNET.ImGui.BeginTable("##atlas", atlasColumnCount, flags2, new System.Numerics.Vector2(0, tableH)))
                 {
@@ -1702,6 +1730,7 @@ namespace AtlasBiomeHighlighter
                     ProcessWaypointAtlasCacheBudget();
                     if (!_waypointAtlasBuildActive)
                         SortWaypointAtlasRowsBySteps();
+                    SyncFavoriteMapWaypointsFromCurrentAtlasRows(removeStale: !_waypointAtlasBuildActive);
 
                     if (_waypointAtlasBuildActive)
                     {
