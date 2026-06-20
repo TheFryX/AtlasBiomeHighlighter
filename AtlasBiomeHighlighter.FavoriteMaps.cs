@@ -17,11 +17,16 @@ namespace AtlasBiomeHighlighter
 
             int selectedCount = Settings.FavoriteWaypointMaps.Count;
             int autoCount = CountAutoFavoriteWaypoints();
-            var headerFlags = selectedCount == 0
-                ? ImGuiTreeNodeFlags.None
-                : ImGuiTreeNodeFlags.DefaultOpen;
 
-            if (!ImGui.TreeNodeEx($"Favorite Maps  ({selectedCount} selected, {autoCount} auto)", headerFlags))
+            // Keep the tree node ID stable. The selected/auto counts change while the atlas cache updates;
+            // if they are part of the ImGui ID, Dear ImGui treats the header as a different node and
+            // can reopen/recollapse it unexpectedly. Only direct user interaction should change this state.
+            const ImGuiTreeNodeFlags headerFlags = ImGuiTreeNodeFlags.None;
+            bool isOpen = ImGui.TreeNodeEx("Favorite Maps###favorite_maps_panel", headerFlags);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"{selectedCount} selected, {autoCount} auto");
+
+            if (!isOpen)
                 return;
 
             ImGui.TextDisabled("List comes from Preferred Maps. Auto-track uses the normal Atlas Maps cache, not a separate scanner.");
