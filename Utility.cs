@@ -342,6 +342,7 @@ namespace AtlasBiomeHighlighter
             
             
             
+            new("Overrun Abyss", "AbyssOverrun", "AtlasIconContentAbyssOverrun", "Overrun by the Abyssal", "Area contains many extra Abysses"),
             new("Great Beast", "Great Beast", "CompanionsNotable1", "GreatBeast"),
             new("Essence Trove", "Essence Trove", "AtlasIconContentEssence", "EssenceTrove"),
             new("Monstrous Treasure", "Monstrous Treasure", "AtlasIconContentStrongBox", "MonstrousTreasure"),

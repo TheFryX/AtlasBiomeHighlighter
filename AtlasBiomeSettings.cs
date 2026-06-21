@@ -114,6 +114,7 @@ namespace AtlasBiomeHighlighter
 
         public Dictionary<string, ToggleNode> MechanicHighlights { get; set; } = new(StringComparer.OrdinalIgnoreCase)
         {
+            ["Overrun Abyss"] = new(false),
             ["Great Beast"] = new(false),
             ["Essence Trove"] = new(false),
             ["Monstrous Treasure"] = new(false),
