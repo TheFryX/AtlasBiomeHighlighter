@@ -15,6 +15,12 @@ namespace AtlasBiomeHighlighter
         {
             EnsureFavoriteMapStorage();
 
+            // Favorite auto-waypoints must keep updating even when the Atlas Maps / Mechanic
+            // navigator sections are collapsed. The actual cache builders use a small per-frame
+            // budget, so calling this here advances the background caches without depending on
+            // the visible tables being open.
+            SyncFavoriteMapWaypointsFromCurrentAtlasRows(removeStale: true);
+
             int selectedCount = Settings.FavoriteWaypointMaps.Count;
             int autoCount = CountAutoFavoriteWaypoints();
 
@@ -29,7 +35,7 @@ namespace AtlasBiomeHighlighter
             if (!isOpen)
                 return;
 
-            ImGui.TextDisabled("List comes from Preferred Maps. Auto-track uses the normal Atlas Maps cache, not a separate scanner.");
+            ImGui.TextDisabled("List comes from Preferred Maps, including Map Content / Mechanics. Auto-track uses the Atlas Navigator caches.");
 
             bool autoTrack = Settings.FavoriteMapsAutoTrack.Value;
             if (ImGui.Checkbox("Auto-track favorite maps", ref autoTrack))
@@ -115,7 +121,7 @@ namespace AtlasBiomeHighlighter
                 return;
 
             ImGui.TableSetupColumn("Fav", ImGuiTableColumnFlags.WidthFixed, 42);
-            ImGui.TableSetupColumn("Map", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Target", ImGuiTableColumnFlags.WidthStretch);
             ImGui.TableHeadersRow();
 
             int shown = 0;
@@ -155,7 +161,7 @@ namespace AtlasBiomeHighlighter
                 ImGui.TableNextColumn();
                 ImGui.TextDisabled("-");
                 ImGui.TableNextColumn();
-                ImGui.TextDisabled("No maps match the search.");
+                ImGui.TextDisabled("No targets match the search.");
             }
 
             ImGui.EndTable();
@@ -165,15 +171,28 @@ namespace AtlasBiomeHighlighter
         {
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            void AddPreferredMapName(string? key)
+            {
+                var display = Utility.PreferredKeyToDisplayName(key ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(display))
+                    names.Add(display);
+            }
+
+            void AddRawName(string? name)
+            {
+                var display = name?.Trim();
+                if (!string.IsNullOrWhiteSpace(display))
+                    names.Add(display);
+            }
+
             if (Settings.PreferredMaps != null)
             {
                 foreach (var key in Settings.PreferredMaps.Keys)
-                {
-                    var display = Utility.PreferredKeyToDisplayName(key);
-                    if (!string.IsNullOrWhiteSpace(display))
-                        names.Add(display);
-                }
+                    AddPreferredMapName(key);
             }
+
+            foreach (var mechanic in Utility.MapContentMechanics)
+                AddRawName(mechanic.Name);
 
             var groups = Settings.PreferredMapGroups;
             if (groups != null)
@@ -181,14 +200,19 @@ namespace AtlasBiomeHighlighter
                 for (int gi = 0; gi < groups.Count; gi++)
                 {
                     var group = groups[gi];
-                    if (group?.Maps == null)
+                    if (group == null)
                         continue;
 
-                    foreach (var key in group.Maps)
+                    if (group.Maps != null)
                     {
-                        var display = Utility.PreferredKeyToDisplayName(key);
-                        if (!string.IsNullOrWhiteSpace(display))
-                            names.Add(display);
+                        foreach (var key in group.Maps)
+                            AddPreferredMapName(key);
+                    }
+
+                    if (group.Mechanics != null)
+                    {
+                        foreach (var key in group.Mechanics)
+                            AddRawName(key);
                     }
                 }
             }
@@ -209,15 +233,38 @@ namespace AtlasBiomeHighlighter
                 return;
             }
 
-            if (_waypointAtlasRows.Count == 0)
+            // Always advance the Atlas Maps cache here. Previously this cache was only
+            // processed while the Atlas Maps table was expanded, which meant Favorite Maps
+            // could stop auto-adding waypoints when that UI section was collapsed.
+            ProcessWaypointAtlasCacheBudget();
+            if (!_waypointAtlasBuildActive)
+                SortWaypointAtlasRowsBySteps();
+
+            bool hasSelectedMechanics = HasSelectedFavoriteMechanics();
+            if (hasSelectedMechanics)
+            {
+                // Mechanics are also allowed to build in the background for Favorite Maps.
+                // This keeps selected mechanic favorites working even when the Mechanic table
+                // in Atlas Navigator is collapsed.
+                ProcessWaypointMechanicCacheBudget();
+                if (!_waypointMechanicBuildActive)
+                    SortWaypointMechanicRowsBySteps();
+            }
+
+            if (_waypointAtlasRows.Count == 0 && (!hasSelectedMechanics || _waypointMechanicRows.Count == 0))
                 return;
 
             int maxSteps = Math.Clamp(Settings.FavoriteMapsMaxSteps.Value, 1, 999);
             int maxAuto = Math.Clamp(Settings.FavoriteMapsMaxAutoWaypoints.Value, 1, 250);
-            bool canRemoveStale = removeStale && !_waypointAtlasBuildActive && string.IsNullOrEmpty(_waypointAtlasCachedSearch);
+            bool canRemoveStale = removeStale &&
+                                  !_waypointAtlasBuildActive &&
+                                  (!hasSelectedMechanics || !_waypointMechanicBuildActive) &&
+                                  string.IsNullOrEmpty(_waypointAtlasCachedSearch) &&
+                                  (!hasSelectedMechanics || string.IsNullOrEmpty(_waypointMechanicCachedSearch));
             var desiredCoords = canRemoveStale
                 ? new HashSet<(int x, int y)>()
                 : null;
+            var handledCoords = new HashSet<(int x, int y)>();
 
             int autoCount = 0;
             bool changed = false;
@@ -233,6 +280,8 @@ namespace AtlasBiomeHighlighter
 
                 var coord = (row.X, row.Y);
                 desiredCoords?.Add(coord);
+                if (!handledCoords.Add(coord))
+                    continue;
 
                 if (CountAutoFavoriteWaypoints() >= maxAuto && !HasWaypointAt(coord))
                     continue;
@@ -245,6 +294,40 @@ namespace AtlasBiomeHighlighter
                 autoCount++;
                 if (autoCount >= maxAuto)
                     break;
+            }
+
+            if (hasSelectedMechanics && autoCount < maxAuto)
+            {
+                for (int i = 0; i < _waypointMechanicRows.Count; i++)
+                {
+                    var row = _waypointMechanicRows[i];
+                    if (!TryGetFavoriteMechanicMatch(row.Mechanics, out var favoriteName))
+                        continue;
+
+                    if (!TryGetAtlasRouteSteps(row.X, row.Y, out var steps) || steps < 1 || steps > maxSteps)
+                        continue;
+
+                    var coord = (row.X, row.Y);
+                    desiredCoords?.Add(coord);
+                    if (!handledCoords.Add(coord))
+                        continue;
+
+                    if (CountAutoFavoriteWaypoints() >= maxAuto && !HasWaypointAt(coord))
+                        continue;
+
+                    var waypointName = string.IsNullOrWhiteSpace(row.MapName)
+                        ? favoriteName
+                        : $"{row.MapName} - {favoriteName}";
+
+                    int before = Settings.Waypoints.Count;
+                    AddWaypoint(row.Node, waypointName, Settings.FavoriteMapsRoute.Value, true, favoriteName, Settings.FavoriteMapWaypointColor.Value);
+                    if (Settings.Waypoints.Count != before)
+                        changed = true;
+
+                    autoCount++;
+                    if (autoCount >= maxAuto)
+                        break;
+                }
             }
 
             if (desiredCoords != null)
@@ -284,6 +367,84 @@ namespace AtlasBiomeHighlighter
             }
 
             return false;
+        }
+
+        private bool TryGetFavoriteMechanicMatch(string mechanicText, out string favoriteName)
+        {
+            favoriteName = string.Empty;
+            if (string.IsNullOrWhiteSpace(mechanicText) || Settings.FavoriteWaypointMaps == null || Settings.FavoriteWaypointMaps.Count == 0)
+                return false;
+
+            var mechanicParts = mechanicText
+                .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Trim())
+                .Where(part => part.Length != 0)
+                .ToArray();
+
+            if (mechanicParts.Length == 0)
+                return false;
+
+            foreach (var selected in Settings.FavoriteWaypointMaps)
+            {
+                if (!IsKnownFavoriteMechanicName(selected))
+                    continue;
+
+                var selectedToken = Utility.NormalizeToken(selected);
+                if (selectedToken.Length == 0)
+                    continue;
+
+                for (int i = 0; i < mechanicParts.Length; i++)
+                {
+                    var mechanicToken = Utility.NormalizeToken(mechanicParts[i]);
+                    if (mechanicToken.Length != 0 && mechanicToken.Equals(selectedToken, StringComparison.Ordinal))
+                    {
+                        favoriteName = selected;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsKnownFavoriteMechanicName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            for (int i = 0; i < Utility.MapContentMechanics.Length; i++)
+            {
+                if (string.Equals(Utility.MapContentMechanics[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool HasSelectedFavoriteMechanics()
+        {
+            if (Settings.FavoriteWaypointMaps == null || Settings.FavoriteWaypointMaps.Count == 0)
+                return false;
+
+            foreach (var selected in Settings.FavoriteWaypointMaps)
+            {
+                if (IsKnownFavoriteMechanicName(selected))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static string GetFavoriteRemovalToken(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return string.Empty;
+
+            if (IsKnownFavoriteMechanicName(name))
+                return Utility.NormalizeToken(name);
+
+            var token = Utility.PreferredKeyToToken(name);
+            return token.Length == 0 ? Utility.NormalizeToken(name) : token;
         }
 
         private bool HasWaypointAt((int x, int y) coord)
@@ -345,7 +506,7 @@ namespace AtlasBiomeHighlighter
 
         private void RemoveAutoFavoriteWaypointsForMap(string mapName)
         {
-            var token = Utility.PreferredKeyToToken(mapName);
+            var token = GetFavoriteRemovalToken(mapName);
             var wps = Settings.Waypoints;
             bool removedSelected = false;
 
@@ -355,7 +516,7 @@ namespace AtlasBiomeHighlighter
                 if (!wp.AutoFavoriteMap)
                     continue;
 
-                var wpToken = Utility.PreferredKeyToToken(string.IsNullOrWhiteSpace(wp.FavoriteMapName) ? wp.Name : wp.FavoriteMapName);
+                var wpToken = GetFavoriteRemovalToken(string.IsNullOrWhiteSpace(wp.FavoriteMapName) ? wp.Name : wp.FavoriteMapName);
                 if (!string.Equals(token, wpToken, StringComparison.Ordinal))
                     continue;
 
