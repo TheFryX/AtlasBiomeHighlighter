@@ -370,6 +370,7 @@ namespace AtlasBiomeHighlighter
             new("Fleeing Exile", "Fleeing Exile", "AnarchyNotable2", "FleeingExile"),
             new("Breach Hive", "Breach Hive", "BreachNotable4", "BreachHive"),
             new("Delirium", "Delirium", "AtlasIconContentDelirium", "DeliriumMirror", "DeliriumEncounter"),
+            new("Grand Expedition", "Grand Expedition", "Area contains a Grand Expedition", "AreaContainsAGrandExpedition", "AreaContainsGrandExpedition", "ContainsGrandExpedition", "GrandExpedition", "ExpeditionGrand", "AtlasIconContentGrandExpedition", "AtlasLeagueGrandExpedition"),
             new("Grand Mirror", "Grand Mirror", "DeliriumGigaMirror", "GrandMirror", "GigaMirror"),
             new("Simulacrum", "Simulacrum", "DeliriumNotable7"),
             new("Chaotic Cacophony", "Chaotic Cacophony", "ElderShaperNotable1", "ChaoticCacophony"),

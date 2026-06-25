@@ -142,6 +142,7 @@ namespace AtlasBiomeHighlighter
             ["Fleeing Exile"] = new(false),
             ["Breach Hive"] = new(false),
             ["Delirium"] = new(false),
+            ["Grand Expedition"] = new(false),
             ["Grand Mirror"] = new(false),
             ["Simulacrum"] = new(false),
             ["Chaotic Cacophony"] = new(false),
