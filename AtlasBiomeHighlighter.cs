@@ -7,6 +7,7 @@ using System.Text;
 using System.Reflection;
 using ExileCore2;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
+using ExileCore2.Shared.Nodes;
 using ImGuiNET;
 
 namespace AtlasBiomeHighlighter
@@ -240,6 +241,7 @@ namespace AtlasBiomeHighlighter
             _atlasRefreshSw.Start();
             _screenRefreshSw.Start();
             MigratePreferredGroupsIfNeeded();
+            NormalizePreferredMapCatalogForCurrentAtlas();
             ResetAtlasCache();
             RegisterRequestedHotkeys();
             return true;
@@ -247,7 +249,7 @@ namespace AtlasBiomeHighlighter
 
         private void MigratePreferredGroupsIfNeeded()
         {
-            
+            Settings.PreferredMaps ??= new Dictionary<string, ToggleNode>(StringComparer.OrdinalIgnoreCase);
             
             if (Settings.PreferredMapGroups != null && Settings.PreferredMapGroups.Count > 0)
                 return;
@@ -261,6 +263,156 @@ namespace AtlasBiomeHighlighter
 
             Settings.PreferredMapGroups = new List<PreferredMapGroup> { g };
             
+        }
+
+        private void NormalizePreferredMapCatalogForCurrentAtlas()
+        {
+            NormalizePreferredMapDictionary();
+            NormalizePreferredMapGroups();
+            NormalizeFavoriteWaypointMaps();
+            NormalizeTowerHighlightDictionaries();
+            _preferredCacheHash = 0;
+        }
+
+        private void NormalizePreferredMapDictionary()
+        {
+            Settings.PreferredMaps ??= new Dictionary<string, ToggleNode>(StringComparer.OrdinalIgnoreCase);
+
+            RenameDictionaryKey(Settings.PreferredMaps, Utility.LegacySinkingSpireName, Utility.CurrentSwampTowerName, MergeToggleNodes);
+            RemoveDictionaryKey(Settings.PreferredMaps, Utility.RemovedPrecursorTowerName);
+
+            if (!ContainsKeyOrdinalIgnoreCase(Settings.PreferredMaps, Utility.CurrentSwampTowerName))
+                Settings.PreferredMaps[Utility.CurrentSwampTowerName] = new ToggleNode(false);
+        }
+
+        private void NormalizePreferredMapGroups()
+        {
+            if (Settings.PreferredMapGroups == null)
+            {
+                Settings.PreferredMapGroups = new List<PreferredMapGroup>();
+                return;
+            }
+
+            for (int i = 0; i < Settings.PreferredMapGroups.Count; i++)
+            {
+                var group = Settings.PreferredMapGroups[i];
+                if (group == null)
+                    continue;
+
+                group.Maps ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                RenameHashSetValue(group.Maps, Utility.LegacySinkingSpireName, Utility.CurrentSwampTowerName);
+                RemoveHashSetValue(group.Maps, Utility.RemovedPrecursorTowerName);
+
+                group.Mechanics ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private void NormalizeFavoriteWaypointMaps()
+        {
+            Settings.FavoriteWaypointMaps ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            RenameHashSetValue(Settings.FavoriteWaypointMaps, Utility.LegacySinkingSpireName, Utility.CurrentSwampTowerName);
+            RemoveHashSetValue(Settings.FavoriteWaypointMaps, Utility.RemovedPrecursorTowerName);
+        }
+
+        private void NormalizeTowerHighlightDictionaries()
+        {
+            Settings.TowerHighlights ??= new Dictionary<string, ToggleNode>(StringComparer.OrdinalIgnoreCase);
+            Settings.TowerHighlightColors ??= new Dictionary<string, ColorNode>(StringComparer.OrdinalIgnoreCase);
+
+            RenameDictionaryKey(Settings.TowerHighlights, Utility.LegacySinkingSpireName, Utility.CurrentSwampTowerName, MergeToggleNodes);
+            RemoveDictionaryKey(Settings.TowerHighlights, Utility.RemovedPrecursorTowerName);
+            if (!ContainsKeyOrdinalIgnoreCase(Settings.TowerHighlights, Utility.CurrentSwampTowerName))
+                Settings.TowerHighlights[Utility.CurrentSwampTowerName] = new ToggleNode(false);
+
+            RenameDictionaryKey(Settings.TowerHighlightColors, Utility.LegacySinkingSpireName, Utility.CurrentSwampTowerName, MergeColorNodes);
+            RemoveDictionaryKey(Settings.TowerHighlightColors, Utility.RemovedPrecursorTowerName);
+            if (!ContainsKeyOrdinalIgnoreCase(Settings.TowerHighlightColors, Utility.CurrentSwampTowerName))
+                Settings.TowerHighlightColors[Utility.CurrentSwampTowerName] = new ColorNode(Settings.TowerHighlightRingColor.Value);
+        }
+
+        private static void MergeToggleNodes(ToggleNode? target, ToggleNode? source)
+        {
+            if (target != null && source?.Value == true)
+                target.Value = true;
+        }
+
+        private static void MergeColorNodes(ColorNode? target, ColorNode? source)
+        {
+            if (target != null && source != null)
+                target.Value = source.Value;
+        }
+
+        private static bool ContainsKeyOrdinalIgnoreCase<T>(Dictionary<string, T> dictionary, string key)
+        {
+            return TryGetActualKey(dictionary, key, out _);
+        }
+
+        private static void RemoveDictionaryKey<T>(Dictionary<string, T> dictionary, string key)
+        {
+            if (TryGetActualKey(dictionary, key, out var actualKey))
+                dictionary.Remove(actualKey);
+        }
+
+        private static void RenameDictionaryKey<T>(Dictionary<string, T> dictionary, string oldKey, string newKey, Action<T?, T?> merge)
+        {
+            if (!TryGetActualKey(dictionary, oldKey, out var actualOldKey))
+                return;
+
+            var oldValue = dictionary[actualOldKey];
+            dictionary.Remove(actualOldKey);
+
+            if (TryGetActualKey(dictionary, newKey, out var actualNewKey))
+            {
+                merge(dictionary[actualNewKey], oldValue);
+                return;
+            }
+
+            dictionary[newKey] = oldValue;
+        }
+
+        private static bool TryGetActualKey<T>(Dictionary<string, T> dictionary, string key, out string actualKey)
+        {
+            foreach (var existingKey in dictionary.Keys)
+            {
+                if (existingKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+                {
+                    actualKey = existingKey;
+                    return true;
+                }
+            }
+
+            actualKey = string.Empty;
+            return false;
+        }
+
+        private static void RemoveHashSetValue(HashSet<string> set, string value)
+        {
+            if (TryGetActualValue(set, value, out var actualValue))
+                set.Remove(actualValue);
+        }
+
+        private static void RenameHashSetValue(HashSet<string> set, string oldValue, string newValue)
+        {
+            if (!TryGetActualValue(set, oldValue, out var actualOldValue))
+                return;
+
+            set.Remove(actualOldValue);
+            set.Add(newValue);
+        }
+
+        private static bool TryGetActualValue(HashSet<string> set, string value, out string actualValue)
+        {
+            foreach (var existingValue in set)
+            {
+                if (existingValue.Equals(value, StringComparison.OrdinalIgnoreCase))
+                {
+                    actualValue = existingValue;
+                    return true;
+                }
+            }
+
+            actualValue = string.Empty;
+            return false;
         }
 
         private void ResetAtlasCache()

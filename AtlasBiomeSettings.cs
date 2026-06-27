@@ -182,8 +182,7 @@ namespace AtlasBiomeHighlighter
             ["Bluff"] = new(false),
             ["Lost Towers"] = new(false),
             ["Mesa"] = new(false),
-            ["Precursor Tower"] = new(false),
-            ["Sinking Spire"] = new(false),
+            ["Swamp Tower"] = new(false),
         };
         public ColorNode TowerHighlightRingColor { get; set; } = new(Color.FromArgb(255, 200, 80));
         public Dictionary<string, ColorNode> TowerHighlightColors { get; set; } = new(StringComparer.OrdinalIgnoreCase)
@@ -192,8 +191,7 @@ namespace AtlasBiomeHighlighter
             ["Bluff"] = new(Color.FromArgb(255, 210, 90)),
             ["Lost Towers"] = new(Color.FromArgb(190, 120, 255)),
             ["Mesa"] = new(Color.FromArgb(255, 150, 80)),
-            ["Precursor Tower"] = new(Color.FromArgb(100, 255, 160)),
-            ["Sinking Spire"] = new(Color.FromArgb(90, 180, 255)),
+            ["Swamp Tower"] = new(Color.FromArgb(90, 180, 255)),
         };
 
         
@@ -339,8 +337,7 @@ namespace AtlasBiomeHighlighter
             ["Bluff"] = new(false),
             ["Lost Towers"] = new(false),
             ["Mesa"] = new(false),
-            ["Precursor Tower"] = new(false),
-            ["Sinking Spire"] = new(false),
+            ["Swamp Tower"] = new(false),
             ["The Burning Monolith"] = new(false),
             ["Eastern Gateway"] = new(false),
             ["Western Gateway"] = new(false),

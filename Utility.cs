@@ -35,28 +35,40 @@ namespace AtlasBiomeHighlighter
 	        
 	        
 	        
-	        public static string PreferredKeyToToken(string key)
-	        {
-	            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
-	            var main = key;
-	            var dash = key.IndexOf('-');
-	            if (dash >= 0) main = key.Substring(0, dash);
-	            return NormalizeToken(main);
-	        }
+        public const string RemovedPrecursorTowerName = "Precursor Tower";
+        public const string LegacySinkingSpireName = "Sinking Spire";
+        public const string CurrentSwampTowerName = "Swamp Tower";
 
+        public static string PreferredKeyToToken(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+            var main = GetPreferredKeyMainPart(key);
+            return NormalizeToken(CanonicalTowerDisplayName(main));
+        }
 
-                
-                
-                
-                
-                public static string PreferredKeyToDisplayName(string key)
-                {
-                    if (string.IsNullOrWhiteSpace(key)) return string.Empty;
-                    var main = key;
-                    var dash = key.IndexOf('-');
-                    if (dash >= 0) main = key.Substring(0, dash);
-                    return main.Trim();
-                }
+        public static string PreferredKeyToDisplayName(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+            return CanonicalTowerDisplayName(GetPreferredKeyMainPart(key));
+        }
+
+        public static string CanonicalTowerDisplayName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+
+            var trimmed = name.Trim();
+            return trimmed.Equals(LegacySinkingSpireName, StringComparison.OrdinalIgnoreCase)
+                ? CurrentSwampTowerName
+                : trimmed;
+        }
+
+        private static string GetPreferredKeyMainPart(string key)
+        {
+            var main = key;
+            var dash = key.IndexOf('-');
+            if (dash >= 0) main = key.Substring(0, dash);
+            return main.Trim();
+        }
 
 	        public static bool TokenContainsEitherWay(string a, string b)
 	        {
@@ -221,8 +233,7 @@ namespace AtlasBiomeHighlighter
             "Bluff",
             "Lost Towers",
             "Mesa",
-            "Precursor Tower",
-            "Sinking Spire",
+            CurrentSwampTowerName,
         };
 
         private static readonly System.Collections.Generic.Dictionary<string, string> TowerNamesById =
@@ -233,8 +244,7 @@ namespace AtlasBiomeHighlighter
                 ["MapMesa"] = "Mesa",
                 ["MapBluff"] = "Bluff",
                 ["MapAlpineRidge"] = "Alpine Ridge",
-                ["MapPrecursorTower"] = "Precursor Tower",
-                ["MapSinkingSpire"] = "Sinking Spire",
+                ["MapSinkingSpire"] = CurrentSwampTowerName,
             };
 
         public static bool TryGetTowerName(AtlasNodeDescription nd, out string? name)
@@ -258,15 +268,15 @@ namespace AtlasBiomeHighlighter
                     {
                         if (areaName.Equals(tower, StringComparison.OrdinalIgnoreCase))
                         {
-                            name = tower;
+                            name = CanonicalTowerDisplayName(tower);
                             return true;
                         }
                     }
 
                     if (areaName.Contains("Tower", StringComparison.OrdinalIgnoreCase) ||
-                        areaName.Equals("Sinking Spire", StringComparison.OrdinalIgnoreCase))
+                        areaName.Equals(LegacySinkingSpireName, StringComparison.OrdinalIgnoreCase))
                     {
-                        name = areaName.Trim();
+                        name = CanonicalTowerDisplayName(areaName);
                         return true;
                     }
                 }
@@ -829,7 +839,7 @@ namespace AtlasBiomeHighlighter
                 var areaName = ExtractString(GetMember(area, "Name"));
                 if (!string.IsNullOrWhiteSpace(areaName))
                 {
-                    name = areaName.Trim();
+                    name = CanonicalTowerDisplayName(areaName);
                     return true;
                 }
             } catch {}
