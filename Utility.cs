@@ -46,6 +46,34 @@ namespace AtlasBiomeHighlighter
             return NormalizeToken(CanonicalTowerDisplayName(main));
         }
 
+        public static IEnumerable<string> PreferredKeyToTokens(string key)
+        {
+            var display = PreferredKeyToDisplayName(key);
+            var primaryToken = NormalizeToken(display);
+            if (primaryToken.Length != 0)
+                yield return primaryToken;
+
+            foreach (var kvp in UniqueMapNames)
+            {
+                if (!kvp.Value.Equals(display, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var idToken = NormalizeToken(kvp.Key);
+                if (idToken.Length != 0)
+                    yield return idToken;
+            }
+
+            foreach (var kvp in TowerNamesById)
+            {
+                if (!CanonicalTowerDisplayName(kvp.Value).Equals(display, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var idToken = NormalizeToken(kvp.Key);
+                if (idToken.Length != 0)
+                    yield return idToken;
+            }
+        }
+
         public static string PreferredKeyToDisplayName(string key)
         {
             if (string.IsNullOrWhiteSpace(key)) return string.Empty;
@@ -203,6 +231,73 @@ namespace AtlasBiomeHighlighter
             if (v is null) return null;
             if (v is string s) return s;
             try { return v.ToString(); } catch { return null; }
+        }
+
+        private static readonly string[] DirectDisplayNameMembers =
+        {
+            "TextNoTags",
+            "Text",
+            "LabelText",
+            "DisplayName",
+            "Title",
+            "Header",
+            "Caption"
+        };
+
+        private static readonly char[] DisplayNameLineBreakChars = { '\r', '\n' };
+
+        private static bool TryGetDirectDisplayTextName(object? obj, out string? name)
+        {
+            name = null;
+            if (obj == null)
+                return false;
+
+            for (int i = 0; i < DirectDisplayNameMembers.Length; i++)
+            {
+                var raw = ExtractString(GetMember(obj, DirectDisplayNameMembers[i]));
+                if (TryCleanDisplayNameCandidate(raw, out name))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryCleanDisplayNameCandidate(string? value, out string? name)
+        {
+            name = null;
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var s = value.Trim();
+            var newline = s.IndexOfAny(DisplayNameLineBreakChars);
+            if (newline >= 0)
+                s = s.Substring(0, newline).Trim();
+
+            if (s.Length < 2 || s.Length > 96)
+                return false;
+
+            if (s.Contains("AtlasIcon", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("Texture", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains(".dds", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains(".png", StringComparison.OrdinalIgnoreCase) ||
+                s.Contains("/", StringComparison.Ordinal) ||
+                s.Contains("\\", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int lettersOrDigits = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (char.IsLetterOrDigit(s[i]))
+                    lettersOrDigits++;
+            }
+
+            if (lettersOrDigits < 2)
+                return false;
+
+            name = s;
+            return true;
         }
 
         
@@ -840,6 +935,12 @@ namespace AtlasBiomeHighlighter
                 if (!string.IsNullOrWhiteSpace(areaName))
                 {
                     name = CanonicalTowerDisplayName(areaName);
+                    return true;
+                }
+
+                if (TryGetDirectDisplayTextName(rootEl, out var textName) && !string.IsNullOrWhiteSpace(textName))
+                {
+                    name = CanonicalTowerDisplayName(textName);
                     return true;
                 }
             } catch {}

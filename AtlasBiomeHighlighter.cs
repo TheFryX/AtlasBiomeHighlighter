@@ -69,6 +69,7 @@ namespace AtlasBiomeHighlighter
 
         
         private readonly Dictionary<string, string> _preferredTokenToTag = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _preferredTokenToDisplayName = new(StringComparer.Ordinal);
 
         
         private readonly Dictionary<long, NodeTokenCache> _nodeTokenCache = new(512);
@@ -460,6 +461,7 @@ namespace AtlasBiomeHighlighter
             _preferredTokensExact.Clear();
             _preferredMechanicTokensExact.Clear();
             _preferredTokenToTag.Clear();
+            _preferredTokenToDisplayName.Clear();
             var list = new List<string>(enabledCount);
             var mechanicList = new List<string>(enabledCount);
             if (groups != null)
@@ -470,20 +472,15 @@ namespace AtlasBiomeHighlighter
                     if (g == null || !g.Enabled) continue;
                     foreach (var key in g.Maps)
                     {
-                        var token = Utility.PreferredKeyToToken(key);
-                        if (token.Length == 0) continue;
+                        var display = Utility.PreferredKeyToDisplayName(key);
+                        foreach (var token in Utility.PreferredKeyToTokens(key))
+                        {
+                            if (token.Length == 0) continue;
 
-                        if (_preferredTokensExact.Add(token))
-                        {
-                            list.Add(token);
-                            
-                            var display = Utility.PreferredKeyToDisplayName(key);
-                            _preferredTokenToTag[token] = display.Length == 0 ? "[Preferred]" : $"[Preferred {display}]";
-                        }
-                        else if (!_preferredTokenToTag.ContainsKey(token))
-                        {
-                            var display = Utility.PreferredKeyToDisplayName(key);
-                            _preferredTokenToTag[token] = display.Length == 0 ? "[Preferred]" : $"[Preferred {display}]";
+                            if (_preferredTokensExact.Add(token))
+                                list.Add(token);
+
+                            SetPreferredTokenDisplay(token, display);
                         }
                     }
 
@@ -495,14 +492,9 @@ namespace AtlasBiomeHighlighter
                             if (token.Length == 0) continue;
 
                             if (_preferredMechanicTokensExact.Add(token))
-                            {
                                 mechanicList.Add(token);
-                                _preferredTokenToTag[token] = $"[Preferred {key}]";
-                            }
-                            else if (!_preferredTokenToTag.ContainsKey(token))
-                            {
-                                _preferredTokenToTag[token] = $"[Preferred {key}]";
-                            }
+
+                            SetPreferredTokenDisplay(token, key);
                         }
                     }
                 }
@@ -511,11 +503,28 @@ namespace AtlasBiomeHighlighter
             _preferredMechanicTokensList = mechanicList.Count == 0 ? Array.Empty<string>() : mechanicList.ToArray();
         }
 
+        private void SetPreferredTokenDisplay(string token, string? displayName)
+        {
+            if (string.IsNullOrWhiteSpace(token) || _preferredTokenToDisplayName.ContainsKey(token))
+                return;
+
+            var display = displayName?.Trim() ?? string.Empty;
+            _preferredTokenToDisplayName[token] = display;
+            _preferredTokenToTag[token] = display.Length == 0 ? "[Preferred]" : $"[Preferred {display}]";
+        }
+
         private string GetPreferredTag(string? matchedToken)
         {
             if (matchedToken != null && matchedToken.Length != 0 && _preferredTokenToTag.TryGetValue(matchedToken, out var tag))
                 return tag;
             return "[Preferred]";
+        }
+
+        private string GetPreferredDisplayName(string? matchedToken)
+        {
+            if (matchedToken != null && matchedToken.Length != 0 && _preferredTokenToDisplayName.TryGetValue(matchedToken, out var display))
+                return display;
+            return string.Empty;
         }
 
         private bool TryGetCachedNodeTokens(AtlasNodeDescription nd, out string nameToken, out string idToken)
@@ -574,6 +583,9 @@ namespace AtlasBiomeHighlighter
             
             
             HandleHotkeys();
+
+            if (Settings.HighlightPreferredMaps.Value)
+                EnsurePreferredCacheUpToDate();
 
             
             UpdateViewportSize();

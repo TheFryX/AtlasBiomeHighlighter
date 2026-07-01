@@ -44,10 +44,13 @@ namespace AtlasBiomeHighlighter
             Settings.PreferredGuideOnlyOffscreen.Value = false;
             Settings.PreferredGuideFromScreenCenter.Value = true;
 
-            if (!Settings.HighlightPreferredMaps.Value || !Settings.PreferredGuideLines.Value)
+            if (!Settings.HighlightPreferredMaps.Value)
                 return;
 
             EnsurePreferredCacheUpToDate();
+
+            if (!Settings.PreferredGuideLines.Value)
+                return;
 
             if (_preferredGuidePrefHash != _preferredCacheHash)
             {
@@ -503,10 +506,13 @@ namespace AtlasBiomeHighlighter
 
         private void RenderPreferredGuides()
         {
-            if (!Settings.HighlightPreferredMaps.Value || !Settings.PreferredGuideLines.Value)
+            if (!Settings.HighlightPreferredMaps.Value)
                 return;
 
             EnsurePreferredCacheUpToDate();
+
+            if (!Settings.PreferredGuideLines.Value)
+                return;
             if (_preferredTokensExact.Count == 0 && _preferredMechanicTokensExact.Count == 0)
                 return;
 

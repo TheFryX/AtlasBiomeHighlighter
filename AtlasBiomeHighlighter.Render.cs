@@ -104,6 +104,9 @@ namespace AtlasBiomeHighlighter
             long renderNodeLabelsTicks = 0;
             long renderNodeTotalTicks = 0;
 
+            if (Settings.HighlightPreferredMaps.Value)
+                EnsurePreferredCacheUpToDate();
+
             bool anyMechanicHighlightsEnabled = HasAnyMechanicHighlightEnabled();
             bool anyTowerHighlightsEnabled = HasAnyTowerHighlightEnabled();
 
@@ -127,8 +130,6 @@ namespace AtlasBiomeHighlighter
                 
                 bool biomeVisible = biome != Biome.Unknown && Settings.Visible.TryGetValue(biome, out var on) && on.Value;
                 var sflags = info.SpecialFlags;
-                bool isDeadly = (sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
-
                 var mechanicNames = info.MechanicNames;
                 bool mechanicWanted = anyMechanicHighlightsEnabled && IsAnyMechanicHighlightEnabled(mechanicNames);
                 string? highlightedTowerName = null;
@@ -147,7 +148,7 @@ namespace AtlasBiomeHighlighter
                 
                 bool preferredWanted = false;
                 string? preferredMatchedToken = null;
-                if (Settings.HighlightPreferredMaps.Value && !isDeadly)
+                if (Settings.HighlightPreferredMaps.Value)
                 {
                     
                     
@@ -176,6 +177,8 @@ namespace AtlasBiomeHighlighter
                         }
                     }
                 }
+
+                string preferredDisplayName = preferredWanted ? GetPreferredDisplayName(preferredMatchedToken) : string.Empty;
 
                 if (preferredWanted)
                     DebugPreferredMapHit(nd, preferredMatchedToken ?? string.Empty, preferredMatchedToken == null ? null : GetPreferredTag(preferredMatchedToken), info.MapName, biome, sflags);
@@ -308,6 +311,11 @@ namespace AtlasBiomeHighlighter
                         hasMapName)
                     {
                         text = info.MapName!;
+                        labelContainsMapName = true;
+                    }
+                    else if (preferredWanted && !string.IsNullOrWhiteSpace(preferredDisplayName) && !hasMapName)
+                    {
+                        text = preferredDisplayName;
                         labelContainsMapName = true;
                     }
                     else if (Settings.ShowUniqueNameOnLabel.Value &&
@@ -1013,7 +1021,6 @@ namespace AtlasBiomeHighlighter
             
             bool biomeVisible = biome != Biome.Unknown && Settings.Visible.TryGetValue(biome, out var on) && on.Value;
             var sflags = Utility.TryGetSpecialFlags(nd);
-            bool isDeadly = (sflags & Utility.SpecialFlags.DeadlyBoss) != 0;
             bool specialWanted =
                 (HasAnyMechanicHighlightEnabled() && IsAnyMechanicHighlightEnabled(Utility.TryGetMechanicNames(nd))) ||
                 ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
@@ -1025,7 +1032,7 @@ namespace AtlasBiomeHighlighter
                 ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0 && Settings.HighlightAreaContainsExpedition.Value);
 
             bool preferredWanted = false;
-            if (Settings.HighlightPreferredMaps.Value && !isDeadly && TryGetCachedNodeTokens(nd, out var nameToken, out var idToken))
+            if (Settings.HighlightPreferredMaps.Value && TryGetCachedNodeTokens(nd, out var nameToken, out var idToken))
             {
                 
                 preferredWanted =
