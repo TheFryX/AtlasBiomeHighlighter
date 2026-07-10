@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace AtlasBiomeHighlighter
 {
@@ -11,7 +13,8 @@ namespace AtlasBiomeHighlighter
     {
         private const string PerformanceSpikeLogFileName = "AtlasBiomeHighlighter.PerformanceSpikes.txt";
         private readonly Dictionary<string, long> _lastProfilerLogMsByName = new(StringComparer.Ordinal);
-        private readonly object _performanceSpikeLogLock = new();
+        private readonly ConcurrentQueue<string> _performanceSpikeLogQueue = new();
+        private int _performanceSpikeWriterScheduled;
 
         private IDisposable ProfileScope(string name)
         {
@@ -63,17 +66,13 @@ namespace AtlasBiomeHighlighter
             try
             {
                 var thresholdMs = Settings.PerformanceSpikeThresholdMs.Value;
-                var path = Path.Combine(DirectoryFullName, PerformanceSpikeLogFileName);
                 var line = string.Create(
                     CultureInfo.InvariantCulture,
                     $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {name} spike: {elapsedMs:F2} ms (threshold: {thresholdMs} ms){Environment.NewLine}");
-
-                lock (_performanceSpikeLogLock)
-                    File.AppendAllText(path, line, Encoding.UTF8);
+                QueuePerformanceSpikeWrite(line);
             }
             catch
             {
-                
             }
         }
 
@@ -82,20 +81,60 @@ namespace AtlasBiomeHighlighter
             try
             {
                 var thresholdMs = Settings.PerformanceSpikeThresholdMs.Value;
-                var path = Path.Combine(DirectoryFullName, PerformanceSpikeLogFileName);
                 var sb = new StringBuilder(256);
                 sb.Append('[').Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)).Append("] ");
                 sb.Append(name).Append(" spike: ").Append(elapsedMs.ToString("F2", CultureInfo.InvariantCulture));
                 sb.Append(" ms (threshold: ").Append(thresholdMs.ToString(CultureInfo.InvariantCulture)).AppendLine(" ms)");
                 if (!string.IsNullOrWhiteSpace(details))
                     sb.AppendLine(details);
-
-                lock (_performanceSpikeLogLock)
-                    File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
+                QueuePerformanceSpikeWrite(sb.ToString());
             }
             catch
             {
-                
+            }
+        }
+
+        private void QueuePerformanceSpikeWrite(string text)
+        {
+            _performanceSpikeLogQueue.Enqueue(text);
+            if (Interlocked.CompareExchange(ref _performanceSpikeWriterScheduled, 1, 0) != 0)
+                return;
+
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static owner => owner.DrainPerformanceSpikeWrites(),
+                this,
+                preferLocal: false);
+        }
+
+        private void DrainPerformanceSpikeWrites()
+        {
+            try
+            {
+                var path = Path.Combine(DirectoryFullName, PerformanceSpikeLogFileName);
+                var batch = new StringBuilder(2048);
+
+                while (true)
+                {
+                    while (_performanceSpikeLogQueue.TryDequeue(out var line))
+                        batch.Append(line);
+
+                    if (batch.Length != 0)
+                    {
+                        File.AppendAllText(path, batch.ToString(), Encoding.UTF8);
+                        batch.Clear();
+                    }
+
+                    Interlocked.Exchange(ref _performanceSpikeWriterScheduled, 0);
+                    if (_performanceSpikeLogQueue.IsEmpty ||
+                        Interlocked.CompareExchange(ref _performanceSpikeWriterScheduled, 1, 0) != 0)
+                    {
+                        return;
+                    }
+                }
+            }
+            catch
+            {
+                Interlocked.Exchange(ref _performanceSpikeWriterScheduled, 0);
             }
         }
 

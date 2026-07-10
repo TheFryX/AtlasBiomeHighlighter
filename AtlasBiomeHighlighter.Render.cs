@@ -405,6 +405,15 @@ namespace AtlasBiomeHighlighter
 
             try
             {
+                using (ProfileScope("Render Island Rumours"))
+                {
+                    RenderIslandRumourLabels();
+                }
+            }
+            catch { }
+
+            try
+            {
                 using (ProfileScope("Render preferred guides"))
                 {
                     RenderPreferredGuides();
@@ -586,18 +595,27 @@ namespace AtlasBiomeHighlighter
             {
                 var wp = wps[wi];
                 if (!wp.Enabled) continue;
-                if (!_nodeByCoord.TryGetValue((wp.X, wp.Y), out var nd) || nd?.Element is null)
-                    continue;
 
-                Vector2 target;
-                if (!TryGetCalibratedNavigationTargetCenter(nd, out target, allowRawOnScreen: true, forceTransformRebuild: false))
-                    target = TryGetStableNavigationTargetCenter(nd, out var stableWaypointTarget, updateAnchorFromLive: true) ? stableWaypointTarget : new Vector2(nd.Element.Center.X, nd.Element.Center.Y);
+                var coordinate = (wp.X, wp.Y);
+                _nodeByCoord.TryGetValue(coordinate, out var liveNode);
+
+                if (!TryGetCalibratedNavigationTargetCenter(
+                        wp.X,
+                        wp.Y,
+                        liveNode,
+                        out var target,
+                        allowRawOnScreen: true,
+                        forceTransformRebuild: false,
+                        allowFarOffscreen: true))
+                {
+                    continue;
+                }
 
                 var colorArrow = Color.FromArgb(wp.ColorArgb);
                 var debugOrigin = new Vector2(w * 0.5f, h * 0.5f);
                 bool debugOnScreen = target.X > 0 && target.X < w && target.Y > 0 && target.Y < h;
-                if (!debugOnScreen || IsNavigationTargetSuspicious(target))
-                    AppendNavigationDebug("WaypointArrow", nd, debugOrigin, target, debugOnScreen ? "suspicious on-screen waypoint target" : $"off-screen waypoint target wp={wp.Name} coord={wp.X},{wp.Y}");
+                if (liveNode != null && (!debugOnScreen || IsNavigationTargetSuspicious(target)))
+                    AppendNavigationDebug("WaypointArrow", liveNode, debugOrigin, target, debugOnScreen ? "suspicious on-screen waypoint target" : $"off-screen waypoint target wp={wp.Name} coord={wp.X},{wp.Y}");
 
                 
                 if (target.X > 0 && target.X < w && target.Y > 0 && target.Y < h)
@@ -606,18 +624,18 @@ namespace AtlasBiomeHighlighter
                     
                     
                     
-                    if (!wp.ShowLabel)
+                    if (!wp.ShowLabel || liveNode?.Element is null)
                         continue;
 
-                    var mapLabel = nd.Element.Area?.Name;
-                    if (string.IsNullOrWhiteSpace(mapLabel) && Utility.TryGetAnyMapName(nd, out var nm))
+                    var mapLabel = liveNode.Element.Area?.Name;
+                    if (string.IsNullOrWhiteSpace(mapLabel) && Utility.TryGetAnyMapName(liveNode, out var nm))
                         mapLabel = nm;
 
                     var waypointLabel = wp.Name?.Trim();
                     var hasCustomWaypointLabel = !string.IsNullOrWhiteSpace(waypointLabel) &&
                         !string.Equals(waypointLabel, mapLabel, StringComparison.OrdinalIgnoreCase);
 
-                    if (!hasCustomWaypointLabel && WouldMainOverlayRenderMapNameLabel(nd))
+                    if (!hasCustomWaypointLabel && WouldMainOverlayRenderMapNameLabel(liveNode))
                         continue;
 
                     var label = hasCustomWaypointLabel ? waypointLabel : mapLabel;

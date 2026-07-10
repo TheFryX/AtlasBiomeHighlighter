@@ -29,6 +29,7 @@ namespace AtlasBiomeHighlighter
             DrawRenderingSettings(s);
             DrawLabelSettings(s);
             DrawBiomeSettings(s);
+            DrawIslandRumourSettings(s);
             DrawPreferredMapSettings(s);
             DrawWaypointAndRoutingSettings(s);
             DrawTowerRangeSettings(s);
@@ -156,22 +157,222 @@ namespace AtlasBiomeHighlighter
             ImGui.Unindent();
         }
 
+        private void DrawIslandRumourSettings(AtlasBiomeSettings s)
+        {
+            if (!ImGui.CollapsingHeader("Island Rumours"))
+                return;
+
+            ImGui.Indent();
+            { bool v = s.IslandRumoursEnabled.Value; if (ImGui.Checkbox("Enable Island Rumours", ref v)) s.IslandRumoursEnabled.Value = v; }
+            { bool v = s.ShowIslandRumourLabels.Value; if (ImGui.Checkbox("Show tables near atlas buttons", ref v)) s.ShowIslandRumourLabels.Value = v; }
+            {
+                bool v = s.IslandRumourLiveTooltipScanEnabled.Value;
+                if (ImGui.Checkbox("Live tooltip scan (max 3 entries)", ref v))
+                {
+                    s.IslandRumourLiveTooltipScanEnabled.Value = v;
+                    RequestIslandRumourRefresh();
+                }
+            }
+            if (s.IslandRumourLiveTooltipScanEnabled.Value)
+            {
+                ImGui.TextDisabled("Live mode: scans Tooltip/Children only for AtlasButtonNode.IsVisible == true; maximum 3 rows.");
+            }
+            else
+            {
+                ImGui.TextDisabled("Fast mode: reads AtlasPanel.Buttons.Rumors and displays every discovered entry (including new ones).");
+            }
+            DrawColorEdit("Rumour text", s.IslandRumourTextColor.Value, c => s.IslandRumourTextColor.Value = c, false);
+            { bool v = s.IslandRumourUseIndividualColors.Value; if (ImGui.Checkbox("Use per-rumour colors", ref v)) s.IslandRumourUseIndividualColors.Value = v; }
+            { bool v = s.ShowIslandRumourRegionStats.Value; if (ImGui.Checkbox("Show region map / Grand Expedition counts", ref v)) s.ShowIslandRumourRegionStats.Value = v; }
+            DrawColorEdit("Region stats text", s.IslandRumourRegionStatsColor.Value, c => s.IslandRumourRegionStatsColor.Value = c, false);
+            { int v = s.IslandRumourRefreshMs.Value; if (ImGui.SliderInt("Button cache refresh (ms)", ref v, s.IslandRumourRefreshMs.Min, s.IslandRumourRefreshMs.Max)) s.IslandRumourRefreshMs.Value = v; }
+            { int v = s.IslandRumourLabelOffsetY.Value; if (ImGui.SliderInt("Table distance from button", ref v, s.IslandRumourLabelOffsetY.Min, s.IslandRumourLabelOffsetY.Max)) s.IslandRumourLabelOffsetY.Value = v; }
+            { int v = s.IslandRumourLabelFontSize.Value; if (ImGui.SliderInt("Table font size", ref v, s.IslandRumourLabelFontSize.Min, s.IslandRumourLabelFontSize.Max)) s.IslandRumourLabelFontSize.Value = v; }
+            { int v = s.IslandRumourLabelMaxWidth.Value; if (ImGui.SliderInt("Table max width", ref v, s.IslandRumourLabelMaxWidth.Min, s.IslandRumourLabelMaxWidth.Max)) s.IslandRumourLabelMaxWidth.Value = v; }
+            { int v = s.IslandRumourLabelSpacing.Value; if (ImGui.SliderInt("Table row height", ref v, s.IslandRumourLabelSpacing.Min, s.IslandRumourLabelSpacing.Max)) s.IslandRumourLabelSpacing.Value = v; }
+            { float v = s.IslandRumourLabelBackgroundOpacity.Value; if (ImGui.SliderFloat("Table background opacity", ref v, s.IslandRumourLabelBackgroundOpacity.Min, s.IslandRumourLabelBackgroundOpacity.Max)) s.IslandRumourLabelBackgroundOpacity.Value = v; }
+            ImGui.TextDisabled("Fast mode scans all Rumors. Live mode limits the expensive child scan to currently visible atlas buttons.");
+            if (ImGui.SmallButton("Reset table style##island_rumours_reset_style"))
+            {
+                s.IslandRumourLabelFontSize.Value = 16;
+                s.IslandRumourLabelMaxWidth.Value = 540;
+                s.IslandRumourLabelSpacing.Value = 28;
+                s.IslandRumourLabelOffsetY.Value = 44;
+                s.IslandRumourLabelBackgroundOpacity.Value = 0.92f;
+            }
+
+            ImGui.Separator();
+            if (ImGui.SmallButton("Refresh now##island_rumours_refresh_now"))
+            {
+                RequestIslandRumourRefresh();
+                UpdateIslandRumourCache();
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear cache##island_rumours_clear_cache"))
+            {
+                ClearIslandRumourCache();
+            }
+
+            ImGui.TextDisabled($"Cached buttons: {_islandRumourLastButtonCount}; with rumours: {_islandRumourLastNodeCount}; total rumours: {_islandRumourLastRumourCount}");
+            var regionStatButtons = _islandRumourSnapshots.Count(snapshot => snapshot.RegionMapCount > 0);
+            var regionStatMaps = _islandRumourSnapshots.Sum(snapshot => snapshot.RegionMapCount);
+            var regionStatGrandExpeditions = _islandRumourSnapshots.Sum(snapshot => snapshot.RegionGrandExpeditionCount);
+            ImGui.TextDisabled($"Region stats: buttons: {regionStatButtons}; maps: {regionStatMaps}; Grand Expedition: {regionStatGrandExpeditions}");
+            ImGui.TextDisabled("Maps / GE are resolved once per atlas button and then kept in the session cache.");
+            if (!string.IsNullOrWhiteSpace(_islandRumourLastSource))
+                ImGui.TextDisabled("Current source: " + _islandRumourLastSource);
+            if (!string.IsNullOrWhiteSpace(_islandRumourLastError))
+                ImGui.TextDisabled("Last error: " + _islandRumourLastError);
+
+            DrawIslandRumoursCacheTable();
+
+            ImGui.Unindent();
+        }
+
+        private void DrawIslandRumoursCacheTable()
+        {
+            if (!ImGui.CollapsingHeader("Rumours Cache"))
+                return;
+
+            EnsureIslandRumourColorSettings();
+            var activePreferredGroup = GetActivePreferredMapGroupForUi();
+            var observed = BuildIslandRumourCatalog();
+            var observedTokens = observed
+                .Select(GetIslandRumourToken)
+                .Where(token => token.Length != 0)
+                .ToHashSet(StringComparer.Ordinal);
+
+            ImGui.Indent();
+            ImGui.TextDisabled("Known names are matched against in-game names with punctuation/ellipsis stripped.");
+            ImGui.TextDisabled($"Preferred group: {activePreferredGroup.Name} [{(activePreferredGroup.Enabled ? "ON" : "OFF")}]");
+            if (ImGui.SmallButton("Reset tier colors##island_rumour_reset_colors"))
+            {
+                foreach (var definition in BuildIslandRumourDefinitionList())
+                    Settings.IslandRumourColors[definition.Name] = new ColorNode(GetDefaultIslandRumourColor(definition));
+            }
+
+            var flags =
+                ImGuiTableFlags.RowBg |
+                ImGuiTableFlags.BordersInnerH |
+                ImGuiTableFlags.ScrollY |
+                ImGuiTableFlags.SizingStretchProp |
+                ImGuiTableFlags.Resizable;
+
+            if (ImGui.BeginTable("##island_rumours_cache_table", 7, flags, new Vector2(0, 330)))
+            {
+                ImGui.TableSetupColumn("Seen", ImGuiTableColumnFlags.WidthFixed, 42f);
+                ImGui.TableSetupColumn("Color", ImGuiTableColumnFlags.WidthFixed, 54f);
+                ImGui.TableSetupColumn("Preferred", ImGuiTableColumnFlags.WidthFixed, 72f);
+                ImGui.TableSetupColumn("Rumor", ImGuiTableColumnFlags.WidthStretch, 1.1f);
+                ImGui.TableSetupColumn("Map Type", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+                ImGui.TableSetupColumn("Mods", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+                ImGui.TableSetupColumn("Rating", ImGuiTableColumnFlags.WidthFixed, 96f);
+                ImGui.TableHeadersRow();
+
+                string currentCategory = string.Empty;
+                var definitions = BuildIslandRumourDefinitionList();
+                for (int i = 0; i < definitions.Count; i++)
+                {
+                    var definition = definitions[i];
+                    if (!string.Equals(currentCategory, definition.Category, StringComparison.Ordinal))
+                    {
+                        currentCategory = definition.Category;
+                        ImGui.TableNextRow();
+                        ImGui.TableSetColumnIndex(0);
+                        ImGui.TextDisabled(currentCategory);
+                        for (int col = 1; col < 7; col++)
+                        {
+                            ImGui.TableSetColumnIndex(col);
+                            ImGui.TextDisabled("-");
+                        }
+                    }
+
+                    ImGui.PushID("rumour_cache_" + definition.Name);
+                    ImGui.TableNextRow();
+
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.TextUnformatted(observedTokens.Contains(Utility.NormalizeToken(definition.Name)) ? "Yes" : "");
+
+                    ImGui.TableSetColumnIndex(1);
+                    var colorNode = Settings.IslandRumourColors[definition.Name];
+                    if (DrawColorSquare("color", colorNode.Value, out var newColor))
+                        colorNode.Value = newColor;
+
+                    ImGui.TableSetColumnIndex(2);
+                    bool preferred = activePreferredGroup.Rumours.Contains(definition.Name);
+                    if (ImGui.Checkbox("##preferred", ref preferred))
+                    {
+                        if (preferred)
+                            activePreferredGroup.Rumours.Add(definition.Name);
+                        else
+                            activePreferredGroup.Rumours.Remove(definition.Name);
+                    }
+
+                    ImGui.TableSetColumnIndex(3);
+                    ImGui.TextUnformatted(definition.Name);
+
+                    ImGui.TableSetColumnIndex(4);
+                    ImGui.TextUnformatted(definition.MapType);
+
+                    ImGui.TableSetColumnIndex(5);
+                    ImGui.TextUnformatted(definition.Mods);
+
+                    ImGui.TableSetColumnIndex(6);
+                    ImGui.TextUnformatted(definition.Rating);
+
+                    ImGui.PopID();
+                }
+
+                ImGui.EndTable();
+            }
+
+            var unknownObserved = observed
+                .Where(name => !TryGetIslandRumourDefinition(name, out _))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (unknownObserved.Length != 0 && ImGui.CollapsingHeader($"Observed outside table ({unknownObserved.Length})"))
+            {
+                ImGui.Indent();
+                for (int i = 0; i < Math.Min(unknownObserved.Length, 32); i++)
+                    ImGui.BulletText(unknownObserved[i]);
+                if (unknownObserved.Length > 32)
+                    ImGui.TextDisabled($"+ {unknownObserved.Length - 32} more");
+                ImGui.Unindent();
+            }
+
+            ImGui.Unindent();
+        }
+
+        private PreferredMapGroup GetActivePreferredMapGroupForUi()
+        {
+            MigratePreferredGroupsIfNeeded();
+
+            var groups = Settings.PreferredMapGroups;
+            if (groups == null)
+                Settings.PreferredMapGroups = groups = new List<PreferredMapGroup>();
+            if (groups.Count == 0)
+                groups.Add(new PreferredMapGroup { Name = "Default", Enabled = true });
+
+            if (_selectedPreferredGroup < 0)
+                _selectedPreferredGroup = 0;
+            if (_selectedPreferredGroup >= groups.Count)
+                _selectedPreferredGroup = groups.Count - 1;
+
+            var activeGroup = groups[_selectedPreferredGroup];
+            activeGroup.Maps ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            activeGroup.Mechanics ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            activeGroup.Rumours ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return activeGroup;
+        }
+
         private void DrawPreferredMapSettings(AtlasBiomeSettings s)
         {
             if (!ImGui.CollapsingHeader("Preferred Maps"))
                 return;
 
             ImGui.Indent();
-            MigratePreferredGroupsIfNeeded();
-
+            var activeGroup = GetActivePreferredMapGroupForUi();
             var groups = Settings.PreferredMapGroups;
-            if (groups == null)
-                Settings.PreferredMapGroups = groups = new System.Collections.Generic.List<PreferredMapGroup>();
-            if (groups.Count == 0)
-                groups.Add(new PreferredMapGroup { Name = "Default", Enabled = true });
-
-            if (_selectedPreferredGroup < 0) _selectedPreferredGroup = 0;
-            if (_selectedPreferredGroup >= groups.Count) _selectedPreferredGroup = groups.Count - 1;
 
             bool highlight = s.HighlightPreferredMaps.Value;
             if (ImGui.Checkbox("Highlight Preferred maps", ref highlight))
@@ -188,6 +389,7 @@ namespace AtlasBiomeHighlighter
                 var name = string.IsNullOrWhiteSpace(_newPreferredGroupName) ? "New Group" : _newPreferredGroupName.Trim();
                 groups.Add(new PreferredMapGroup { Name = name, Enabled = true });
                 _selectedPreferredGroup = groups.Count - 1;
+                activeGroup = groups[_selectedPreferredGroup];
             }
 
             const float tabBarHeight = 26f;
@@ -215,7 +417,7 @@ namespace AtlasBiomeHighlighter
             }
             ImGui.EndChild();
 
-            var activeGroup = groups[_selectedPreferredGroup];
+            activeGroup = groups[_selectedPreferredGroup];
             bool enabled = activeGroup.Enabled;
             if (ImGui.Checkbox("Enable this group", ref enabled)) activeGroup.Enabled = enabled;
             ImGui.SameLine();
@@ -230,6 +432,7 @@ namespace AtlasBiomeHighlighter
             {
                 groups.RemoveAt(_selectedPreferredGroup);
                 if (_selectedPreferredGroup >= groups.Count) _selectedPreferredGroup = groups.Count - 1;
+                activeGroup = groups[_selectedPreferredGroup];
             }
 
             if (_renamePreferredGroupPopupOpen && ImGui.BeginPopupModal("RenamePreferredGroupPopup", ref _renamePreferredGroupPopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
@@ -281,6 +484,7 @@ namespace AtlasBiomeHighlighter
             DrawPreferredCategory("Hideout", activeGroup, key => IsPreferredInCategory(key, PreferredHideouts));
             DrawPreferredCategory("Unique Maps", activeGroup, key => IsPreferredInCategory(key, PreferredUniqueMaps));
             DrawPreferredMechanicsCategory("Mechanics", activeGroup);
+            DrawPreferredRumoursCategory("Island Rumours", activeGroup);
 
             ImGui.EndChild();
             ImGui.Unindent();
@@ -769,6 +973,70 @@ namespace AtlasBiomeHighlighter
                     else activeGroup.Mechanics.Remove(key);
                 }
             }
+            ImGui.Unindent();
+        }
+
+        private void DrawPreferredRumoursCategory(string label, PreferredMapGroup activeGroup)
+        {
+            activeGroup.Rumours ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var keys = BuildIslandRumourDefinitionList()
+                .Where(d => string.IsNullOrEmpty(_preferredFilter) ||
+                            d.Name.IndexOf(_preferredFilter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            d.MapType.IndexOf(_preferredFilter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            d.Mods.IndexOf(_preferredFilter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            d.Rating.IndexOf(_preferredFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToArray();
+
+            if (keys.Length == 0)
+                return;
+
+            if (!ImGui.CollapsingHeader($"{label} ({keys.Length})"))
+                return;
+
+            ImGui.Indent();
+            if (ImGui.BeginTable("##preferred_rumours_table", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp))
+            {
+                ImGui.TableSetupColumn("On", ImGuiTableColumnFlags.WidthFixed, 42f);
+                ImGui.TableSetupColumn("Rumor", ImGuiTableColumnFlags.WidthStretch, 1.1f);
+                ImGui.TableSetupColumn("Map Type", ImGuiTableColumnFlags.WidthStretch, 0.95f);
+                ImGui.TableSetupColumn("Mods", ImGuiTableColumnFlags.WidthStretch, 1.1f);
+                ImGui.TableSetupColumn("Rating", ImGuiTableColumnFlags.WidthFixed, 82f);
+                ImGui.TableHeadersRow();
+
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    var definition = keys[i];
+                    ImGui.PushID("preferred_rumour_" + definition.Name);
+                    ImGui.TableNextRow();
+
+                    ImGui.TableSetColumnIndex(0);
+                    bool on = activeGroup.Rumours.Contains(definition.Name);
+                    if (ImGui.Checkbox("##enabled", ref on))
+                    {
+                        if (on) activeGroup.Rumours.Add(definition.Name);
+                        else activeGroup.Rumours.Remove(definition.Name);
+                    }
+
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.TextUnformatted(definition.Name);
+
+                    ImGui.TableSetColumnIndex(2);
+                    ImGui.TextUnformatted(definition.MapType);
+
+                    ImGui.TableSetColumnIndex(3);
+                    ImGui.TextUnformatted(definition.Mods);
+
+                    ImGui.TableSetColumnIndex(4);
+                    ImGui.TextUnformatted(definition.Rating);
+
+                    ImGui.PopID();
+                }
+
+                ImGui.EndTable();
+            }
+
+            ImGui.TextDisabled("Selected rumours use Preferred guide arrows when the active Island Rumours cache contains them.");
             ImGui.Unindent();
         }
 

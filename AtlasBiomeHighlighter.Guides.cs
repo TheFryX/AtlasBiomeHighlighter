@@ -10,8 +10,10 @@ namespace AtlasBiomeHighlighter
         private const int PreferredGuideScanBudgetPerTick = 6;
         private const int PreferredGuidePruneMs = 2_500;
         private const int PreferredGuidePruneBudgetPerTick = 8;
-        private const int PreferredGuideMaxCachedTargets = 256;
+        private const int PreferredGuideMaxCachedTargets = 1024;
         private const int PreferredGuideImmediateSeedLimit = 256;
+        private const float ArrowProjectionAbsoluteLimit = 2_000_000f;
+        private const float LiveCenterProjectionTolerance = 320f;
 
         private readonly List<AtlasNodeDescription> _preferredGuideNodes = new(64);
         private readonly HashSet<(int x, int y)> _preferredGuideCoords = new();
@@ -119,6 +121,8 @@ namespace AtlasBiomeHighlighter
             _preferredGuidePruneIndex = 0;
             _preferredGuideImmediateSeedHash = 0;
             _preferredGuideImmediateSeedAtlasCount = 0;
+            _preferredCoordTransform = default;
+            _preferredCoordTransformLastBuildMs = 0;
         }
 
         private void SeedPreferredGuideTargetsImmediate()
@@ -261,12 +265,30 @@ namespace AtlasBiomeHighlighter
                     _preferredGuidePruneIndex = 0;
 
                 var node = _preferredGuideNodes[_preferredGuidePruneIndex];
-                if (node?.Element is null || !IsPreferredGuideCandidate(node))
+                bool remove = node == null;
+
+                // Cached AtlasNodeDescription objects can keep a non-null Element after the UI has
+                // recycled that element for another map. Revalidating through that stale Element
+                // deletes a perfectly valid off-screen target. Candidate changes are handled when
+                // the same coordinate is genuinely visible again in EnsureVisiblePreferredGuideTargets.
+                if (!remove)
+                {
+                    try
+                    {
+                        var coord = (node!.Coordinate.X, node.Coordinate.Y);
+                        remove = !_preferredGuideCoords.Contains(coord);
+                    }
+                    catch
+                    {
+                        remove = true;
+                    }
+                }
+
+                if (remove)
                 {
                     if (node != null)
                         _preferredGuideCoords.Remove((node.Coordinate.X, node.Coordinate.Y));
                     _preferredGuideNodes.RemoveAt(_preferredGuidePruneIndex);
-                    
                 }
                 else
                 {
@@ -279,17 +301,17 @@ namespace AtlasBiomeHighlighter
 
         private bool TryGetPreferredCoordTransform(out PreferredCoordTransform transform, bool forceRebuild = false)
         {
-            transform = _preferredCoordTransform;
+            var previous = _preferredCoordTransform;
+            transform = previous;
             long now = Environment.TickCount64;
             if (!forceRebuild && transform.Valid && now - _preferredCoordTransformLastBuildMs < 250)
                 return true;
 
             _preferredCoordTransformLastBuildMs = now;
-            transform = default;
 
             var nodes = _visibleNodes;
             if (nodes == null || nodes.Count < 3)
-                return false;
+                return previous.Valid;
 
             double s1 = 0, sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0;
             double ssx = 0, ssxX = 0, ssxY = 0;
@@ -329,12 +351,17 @@ namespace AtlasBiomeHighlighter
             }
 
             if (used < 3)
-                return false;
+            {
+                transform = previous;
+                return previous.Valid;
+            }
 
-            if (!SolvePreferredAffine(sxx, sxy, sx, sxy, syy, sy, sx, sy, s1, ssxX, ssxY, ssx, out var ax, out var bx, out var cx))
-                return false;
-            if (!SolvePreferredAffine(sxx, sxy, sx, sxy, syy, sy, sx, sy, s1, ssyX, ssyY, ssy, out var ay, out var by, out var cy))
-                return false;
+            if (!SolvePreferredAffine(sxx, sxy, sx, sxy, syy, sy, sx, sy, s1, ssxX, ssxY, ssx, out var ax, out var bx, out var cx) ||
+                !SolvePreferredAffine(sxx, sxy, sx, sxy, syy, sy, sx, sy, s1, ssyX, ssyY, ssy, out var ay, out var by, out var cy))
+            {
+                transform = previous;
+                return previous.Valid;
+            }
 
             transform = new PreferredCoordTransform
             {
@@ -382,34 +409,118 @@ namespace AtlasBiomeHighlighter
             return double.IsFinite(x0) && double.IsFinite(x1) && double.IsFinite(x2);
         }
 
+        private bool IsNavigationProjectionUsable(Vector2 target, bool allowFarOffscreen)
+        {
+            if (!float.IsFinite(target.X) || !float.IsFinite(target.Y))
+                return false;
+
+            if (!allowFarOffscreen)
+                return !IsNavigationTargetSuspicious(target);
+
+            // Arrow rendering only needs a stable direction. Targets can legitimately project many
+            // screens beyond the viewport when the Atlas is panned from one edge to the other.
+            return Math.Abs(target.X) <= ArrowProjectionAbsoluteLimit &&
+                   Math.Abs(target.Y) <= ArrowProjectionAbsoluteLimit;
+        }
+
         private bool TryGetCalibratedNavigationTargetCenter(
             AtlasNodeDescription node,
             out Vector2 center,
             bool allowRawOnScreen = true,
-            bool forceTransformRebuild = false)
+            bool forceTransformRebuild = false,
+            bool allowFarOffscreen = false)
         {
             center = default;
-            if (node?.Element is null)
+            if (node == null)
                 return false;
 
-            if (allowRawOnScreen && TryGetRawNodeCenter(node, out var raw) && IsNodeActuallyOnScreen(raw) && !IsNavigationTargetSuspicious(raw))
+            try
             {
-                center = raw;
+                var coordinate = node.Coordinate;
+                return TryGetCalibratedNavigationTargetCenter(
+                    coordinate.X,
+                    coordinate.Y,
+                    node,
+                    out center,
+                    allowRawOnScreen,
+                    forceTransformRebuild,
+                    allowFarOffscreen);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryGetCalibratedNavigationTargetCenter(
+            int coordinateX,
+            int coordinateY,
+            AtlasNodeDescription? liveNode,
+            out Vector2 center,
+            bool allowRawOnScreen = true,
+            bool forceTransformRebuild = false,
+            bool allowFarOffscreen = false)
+        {
+            center = default;
+
+            bool hasProjectedCenter = false;
+            Vector2 projectedCenter = default;
+
+            // The affine Atlas-coordinate transform is the primary source for arrows. Building it
+            // before trusting Element.Center also lets us reject UI elements that were recycled for
+            // a different node after the original target left the viewport.
+            if (TryGetPreferredCoordTransform(out var transform, forceTransformRebuild))
+            {
+                projectedCenter = new Vector2(
+                    transform.Ax * coordinateX + transform.Bx * coordinateY + transform.Cx,
+                    transform.Ay * coordinateX + transform.By * coordinateY + transform.Cy);
+                hasProjectedCenter = IsNavigationProjectionUsable(projectedCenter, allowFarOffscreen);
+            }
+
+            if (allowRawOnScreen &&
+                liveNode != null &&
+                TryGetRawNodeCenter(liveNode, out var rawCenter) &&
+                IsNodeActuallyOnScreen(rawCenter) &&
+                !IsNavigationTargetSuspicious(rawCenter))
+            {
+                bool agreesWithProjection = !hasProjectedCenter ||
+                    Vector2.DistanceSquared(rawCenter, projectedCenter) <=
+                    LiveCenterProjectionTolerance * LiveCenterProjectionTolerance;
+
+                if (agreesWithProjection)
+                {
+                    UpdateNavigationTargetAnchor(coordinateX, coordinateY, rawCenter);
+                    center = rawCenter;
+                    return true;
+                }
+            }
+
+            if (hasProjectedCenter)
+            {
+                center = projectedCenter;
                 return true;
             }
 
-            if (!TryGetPreferredCoordTransform(out var t, forceTransformRebuild))
-                return false;
-
-            float x = node.Coordinate.X;
-            float y = node.Coordinate.Y;
-            center = new Vector2(t.Ax * x + t.Bx * y + t.Cx, t.Ay * x + t.By * y + t.Cy);
-            return float.IsFinite(center.X) && float.IsFinite(center.Y) && !IsNavigationTargetSuspicious(center);
+            // During short calibration gaps, fall back to the last live target anchor plus the
+            // current Atlas pan delta instead of dropping the arrow for a frame or permanently.
+            return TryGetStableNavigationTargetCenter(
+                       coordinateX,
+                       coordinateY,
+                       liveNode,
+                       out center,
+                       updateAnchorFromLive: true,
+                       allowFarOffscreen: allowFarOffscreen) &&
+                   IsNavigationProjectionUsable(center, allowFarOffscreen);
         }
 
         private bool TryGetPreferredGuideTargetCenter(AtlasNodeDescription node, out Vector2 center)
         {
-            return TryGetCalibratedNavigationTargetCenter(node, out center, allowRawOnScreen: true, forceTransformRebuild: false);
+            return TryGetCalibratedNavigationTargetCenter(
+                node,
+                out center,
+                allowRawOnScreen: true,
+                forceTransformRebuild: false,
+                allowFarOffscreen: true);
         }
 
 
@@ -431,13 +542,17 @@ namespace AtlasBiomeHighlighter
                     continue;
 
                 var coord = (node.Coordinate.X, node.Coordinate.Y);
+                bool isCandidate = IsPreferredGuideCandidate(info);
                 if (_preferredGuideCoords.Contains(coord))
                 {
-                    PromotePreferredGuideTarget(coord);
+                    if (isCandidate)
+                        PromotePreferredGuideTarget(coord, node);
+                    else
+                        RemovePreferredGuideTarget(coord);
                     continue;
                 }
 
-                if (!IsPreferredGuideCandidate(info))
+                if (!isCandidate)
                     continue;
 
                 if (_preferredGuideNodes.Count >= PreferredGuideMaxCachedTargets)
@@ -452,55 +567,83 @@ namespace AtlasBiomeHighlighter
         }
 
 
-        private void PromotePreferredGuideTarget((int x, int y) coord)
+        private void PromotePreferredGuideTarget((int x, int y) coord, AtlasNodeDescription liveNode)
         {
-            
-            
             for (int i = 0; i < _preferredGuideNodes.Count; i++)
             {
-                var n = _preferredGuideNodes[i];
-                if (n == null)
+                var cachedNode = _preferredGuideNodes[i];
+                if (cachedNode == null)
                     continue;
-                if (n.Coordinate.X != coord.x || n.Coordinate.Y != coord.y)
+                if (cachedNode.Coordinate.X != coord.x || cachedNode.Coordinate.Y != coord.y)
                     continue;
+
+                // Replace a virtualized/stale description with the current live description before
+                // promoting it. This refreshes raw screen coordinates and navigation anchors.
                 if (i == 0)
+                {
+                    _preferredGuideNodes[0] = liveNode;
                     return;
+                }
 
                 _preferredGuideNodes.RemoveAt(i);
-                _preferredGuideNodes.Insert(0, n);
+                _preferredGuideNodes.Insert(0, liveNode);
                 return;
+            }
+        }
+
+        private void RemovePreferredGuideTarget((int x, int y) coord)
+        {
+            _preferredGuideCoords.Remove(coord);
+            for (int i = _preferredGuideNodes.Count - 1; i >= 0; i--)
+            {
+                var node = _preferredGuideNodes[i];
+                if (node == null)
+                {
+                    _preferredGuideNodes.RemoveAt(i);
+                    continue;
+                }
+
+                try
+                {
+                    if (node.Coordinate.X == coord.x && node.Coordinate.Y == coord.y)
+                        _preferredGuideNodes.RemoveAt(i);
+                }
+                catch
+                {
+                    _preferredGuideNodes.RemoveAt(i);
+                }
             }
         }
 
         private void RemoveOnePreferredGuideTargetForVisibleSeed()
         {
-            
-            
+            // Do not evict a valid off-screen target merely because its UI Element was virtualized.
+            // Only reclaim entries that are definitely invalid while live. With the bounded 1024
+            // target cache this keeps long-distance arrows stable without unbounded growth.
             for (int i = 0; i < _preferredGuideNodes.Count; i++)
             {
-                var n = _preferredGuideNodes[i];
-                Vector2 c = default;
-                bool remove = n?.Element is null;
-                if (!remove && !TryGetPreferredGuideTargetCenter(n, out c))
-                    remove = true;
-                if (!remove && !IsNodeActuallyOnScreen(c))
-                    remove = true;
-
-                if (remove)
+                var node = _preferredGuideNodes[i];
+                bool remove = node == null;
+                if (!remove)
                 {
-                    if (n != null)
-                        _preferredGuideCoords.Remove((n.Coordinate.X, n.Coordinate.Y));
-                    _preferredGuideNodes.RemoveAt(i);
-                    return;
+                    try
+                    {
+                        var coord = (node!.Coordinate.X, node.Coordinate.Y);
+                        remove = !_preferredGuideCoords.Contains(coord);
+                    }
+                    catch
+                    {
+                        remove = true;
+                    }
                 }
-            }
 
-            if (_preferredGuideNodes.Count > 0)
-            {
-                var n = _preferredGuideNodes[0];
-                if (n != null)
-                    _preferredGuideCoords.Remove((n.Coordinate.X, n.Coordinate.Y));
-                _preferredGuideNodes.RemoveAt(0);
+                if (!remove)
+                    continue;
+
+                if (node != null)
+                    _preferredGuideCoords.Remove((node.Coordinate.X, node.Coordinate.Y));
+                _preferredGuideNodes.RemoveAt(i);
+                return;
             }
         }
 
@@ -513,11 +656,14 @@ namespace AtlasBiomeHighlighter
 
             if (!Settings.PreferredGuideLines.Value)
                 return;
-            if (_preferredTokensExact.Count == 0 && _preferredMechanicTokensExact.Count == 0)
+            bool hasNodeGuideTargets = _preferredTokensExact.Count != 0 || _preferredMechanicTokensExact.Count != 0;
+            bool hasRumourGuideTargets = _preferredRumourTokensExact.Count != 0 && _islandRumourSnapshots.Count != 0;
+            if (!hasNodeGuideTargets && !hasRumourGuideTargets)
                 return;
 
-            EnsureVisiblePreferredGuideTargets();
-            if (_preferredGuideNodes.Count == 0)
+            if (hasNodeGuideTargets)
+                EnsureVisiblePreferredGuideTargets();
+            if (_preferredGuideNodes.Count == 0 && !hasRumourGuideTargets)
                 return;
 
             var origin = Settings.PreferredGuideFromScreenCenter.Value
@@ -527,13 +673,13 @@ namespace AtlasBiomeHighlighter
             var color = Settings.PreferredMapRingColor.Value;
             int thickness = Settings.PreferredGuideThickness.Value;
             int arrowSize = Settings.PreferredArrowSize.Value;
-            int limit = Math.Min(Settings.PreferredGuideLimit.Value, _preferredGuideNodes.Count);
+            int limit = Settings.PreferredGuideLimit.Value;
             int drawn = 0;
 
             for (int i = 0; i < _preferredGuideNodes.Count && drawn < limit; i++)
             {
                 var node = _preferredGuideNodes[i];
-                if (node?.Element is null)
+                if (node == null)
                     continue;
 
                 if (!TryGetPreferredGuideTargetCenter(node, out var pos))
@@ -542,31 +688,54 @@ namespace AtlasBiomeHighlighter
                 bool onScreen = pos.X > 0 && pos.X < BorderX && pos.Y > 0 && pos.Y < BorderY;
                 if (!onScreen || IsNavigationTargetSuspicious(pos))
                     AppendNavigationDebug("PreferredGuide", node, origin, pos, onScreen ? "suspicious on-screen target" : "off-screen target used for arrow");
-                if (Settings.PreferredGuideOnlyOffscreen.Value && onScreen)
-                    continue;
 
-                var dir = pos - origin;
-                if (dir.LengthSquared() < 1f)
-                    continue;
-
-                if (!onScreen)
-                {
-                    var to = ClampToRectEdge(origin, pos, BorderX, BorderY, 8f);
-                    DrawArrow(origin, to, thickness, color, arrowSize);
-                }
-                else
-                {
-                    dir = Vector2.Normalize(dir);
-                    const float offset = 50f;
-                    var from = origin + dir * offset;
-                    var to = pos - dir * offset;
-                    if (Vector2.DistanceSquared(from, to) > 4f)
-                        Graphics.DrawLine(from, to, thickness, color);
-                    DrawArrow(to - dir, to, thickness, color, arrowSize);
-                }
-
-                drawn++;
+                if (DrawPreferredGuideArrow(origin, pos, color, thickness, arrowSize))
+                    drawn++;
             }
+
+            if (hasRumourGuideTargets && drawn < limit)
+            {
+                for (int i = 0; i < _islandRumourSnapshots.Count && drawn < limit; i++)
+                {
+                    var snapshot = _islandRumourSnapshots[i];
+                    if (!TryGetPreferredIslandRumourMatch(snapshot, out var matchedName))
+                        continue;
+
+                    if (!TryGetIslandRumourButtonCenter(snapshot.Button, out var pos))
+                        continue;
+
+                    var rumourColor = GetIslandRumourColor(matchedName);
+                    if (DrawPreferredGuideArrow(origin, pos, rumourColor, thickness, arrowSize))
+                        drawn++;
+                }
+            }
+        }
+
+        private bool DrawPreferredGuideArrow(Vector2 origin, Vector2 pos, System.Drawing.Color color, int thickness, int arrowSize)
+        {
+            bool onScreen = pos.X > 0 && pos.X < BorderX && pos.Y > 0 && pos.Y < BorderY;
+            if (Settings.PreferredGuideOnlyOffscreen.Value && onScreen)
+                return false;
+
+            var dir = pos - origin;
+            if (dir.LengthSquared() < 1f)
+                return false;
+
+            if (!onScreen)
+            {
+                var to = ClampToRectEdge(origin, pos, BorderX, BorderY, 8f);
+                DrawArrow(origin, to, thickness, color, arrowSize);
+                return true;
+            }
+
+            dir = Vector2.Normalize(dir);
+            const float offset = 50f;
+            var from = origin + dir * offset;
+            var toOnScreen = pos - dir * offset;
+            if (Vector2.DistanceSquared(from, toOnScreen) > 4f)
+                Graphics.DrawLine(from, toOnScreen, thickness, color);
+            DrawArrow(toOnScreen - dir, toOnScreen, thickness, color, arrowSize);
+            return true;
         }
 
         private bool TryGetNodeScreenCenter(AtlasNodeDescription node, out Vector2 center)

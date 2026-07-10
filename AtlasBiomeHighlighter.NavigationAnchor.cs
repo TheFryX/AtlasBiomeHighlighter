@@ -16,6 +16,7 @@ namespace AtlasBiomeHighlighter
         }
 
         private readonly Dictionary<(int x, int y), NavigationAnchor> _navigationAnchorByCoord = new(2048);
+        private readonly List<string> _navigationPanTraceScratch = new(8);
         private Vector2 _navigationCachedPan;
         private long _navigationCachedPanMs;
         private bool _navigationCachedPanOk;
@@ -41,12 +42,13 @@ namespace AtlasBiomeHighlighter
                 if (helper == null || helper.Address == 0)
                     return false;
 
-                int panOffset = GetStage37PanOffset(helper, new List<string>());
+                _navigationPanTraceScratch.Clear();
+                int panOffset = GetStage37PanOffset(helper, _navigationPanTraceScratch);
                 if (panOffset <= 0)
                     panOffset = 0x490;
 
                 bool closeHandle;
-                var handle = GetStage35WritableProcessHandle(new List<string>(), out closeHandle);
+                var handle = GetStage35WritableProcessHandle(_navigationPanTraceScratch, out closeHandle);
                 try
                 {
                     if (handle == IntPtr.Zero)
@@ -102,60 +104,117 @@ namespace AtlasBiomeHighlighter
             return anchorCenter + NavigationPanBasisX * d.X + NavigationPanBasisY * d.Y;
         }
 
+        private void UpdateNavigationTargetAnchor(int coordinateX, int coordinateY, Vector2 rawCenter)
+        {
+            if (!IsNodeActuallyOnScreen(rawCenter) || IsNavigationTargetSuspicious(rawCenter))
+                return;
+
+            if (!TryReadNavigationPan(out var pan))
+                return;
+
+            _navigationAnchorByCoord[(coordinateX, coordinateY)] = new NavigationAnchor
+            {
+                Center = rawCenter,
+                Pan = pan,
+                Ms = Environment.TickCount64,
+                WasVisible = true
+            };
+        }
+
         
         
         
         
-        private bool TryGetStableNavigationTargetCenter(AtlasNodeDescription node, out Vector2 center, bool updateAnchorFromLive = true)
+        private bool TryGetStableNavigationTargetCenter(
+            AtlasNodeDescription node,
+            out Vector2 center,
+            bool updateAnchorFromLive = true,
+            bool allowFarOffscreen = false)
         {
             center = default;
             if (node == null)
                 return false;
 
-            if (!TryGetRawNodeCenter(node, out var rawCenter))
-                return false;
-
-            if (!TryReadNavigationPan(out var pan))
+            try
             {
-                center = rawCenter;
-                return true;
+                var coordinate = node.Coordinate;
+                return TryGetStableNavigationTargetCenter(
+                    coordinate.X,
+                    coordinate.Y,
+                    node,
+                    out center,
+                    updateAnchorFromLive,
+                    allowFarOffscreen);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryGetStableNavigationTargetCenter(
+            int coordinateX,
+            int coordinateY,
+            AtlasNodeDescription? liveNode,
+            out Vector2 center,
+            bool updateAnchorFromLive = true,
+            bool allowFarOffscreen = false)
+        {
+            center = default;
+            var key = (coordinateX, coordinateY);
+
+            Vector2 rawCenter = default;
+            bool hasRawCenter = liveNode != null && TryGetRawNodeCenter(liveNode, out rawCenter);
+            bool hasPan = TryReadNavigationPan(out var pan);
+
+            if (hasRawCenter)
+            {
+                bool onScreen = IsNodeActuallyOnScreen(rawCenter);
+                bool rawSuspicious = IsNavigationTargetSuspicious(rawCenter);
+
+                if (hasPan && updateAnchorFromLive && onScreen && !rawSuspicious)
+                {
+                    _navigationAnchorByCoord[key] = new NavigationAnchor
+                    {
+                        Center = rawCenter,
+                        Pan = pan,
+                        Ms = Environment.TickCount64,
+                        WasVisible = true
+                    };
+                    center = rawCenter;
+                    return true;
+                }
+
+                if (onScreen && !rawSuspicious)
+                {
+                    center = rawCenter;
+                    return true;
+                }
             }
 
-            var coord = node.Coordinate;
-            var key = (coord.X, coord.Y);
-            bool onScreen = IsNodeActuallyOnScreen(rawCenter);
-            bool rawSuspicious = IsNavigationTargetSuspicious(rawCenter);
+            if (hasPan && _navigationAnchorByCoord.TryGetValue(key, out var anchor))
+            {
+                center = ApplyPanDeltaToAnchor(anchor.Center, pan, anchor.Pan);
+                if (IsNavigationProjectionUsable(center, allowFarOffscreen))
+                    return true;
+            }
 
-            if (updateAnchorFromLive && onScreen && !rawSuspicious)
+            if (!hasRawCenter)
+                return false;
+
+            if (hasPan)
             {
                 _navigationAnchorByCoord[key] = new NavigationAnchor
                 {
                     Center = rawCenter,
                     Pan = pan,
                     Ms = Environment.TickCount64,
-                    WasVisible = true
+                    WasVisible = IsNodeActuallyOnScreen(rawCenter)
                 };
-                center = rawCenter;
-                return true;
             }
 
-            if (_navigationAnchorByCoord.TryGetValue(key, out var anchor))
-            {
-                center = ApplyPanDeltaToAnchor(anchor.Center, pan, anchor.Pan);
-                if (float.IsFinite(center.X) && float.IsFinite(center.Y))
-                    return true;
-            }
-
-            
-            _navigationAnchorByCoord[key] = new NavigationAnchor
-            {
-                Center = rawCenter,
-                Pan = pan,
-                Ms = Environment.TickCount64,
-                WasVisible = onScreen
-            };
             center = rawCenter;
-            return true;
+            return IsNavigationProjectionUsable(center, allowFarOffscreen);
         }
 
         private void ResetNavigationTargetAnchors()

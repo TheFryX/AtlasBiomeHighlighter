@@ -52,11 +52,13 @@ namespace AtlasBiomeHighlighter
         
         public HashSet<string> Maps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-        
-        
-        
-        
+
+
+
+
         public HashSet<string> Mechanics { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public HashSet<string> Rumours { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class AtlasBiomeSettings : ISettings
@@ -111,6 +113,23 @@ namespace AtlasBiomeHighlighter
         public ColorNode AreaContainsExpeditionRingColor { get; set; } = new(Color.FromArgb(255, 170, 40));
         public ToggleNode HighlightPreferredMaps { get; set; } = new(false);
         public ColorNode PreferredMapRingColor { get; set; } = new(Color.FromArgb(0, 206, 209)); 
+
+        public ToggleNode IslandRumoursEnabled { get; set; } = new(true);
+        public ToggleNode ShowIslandRumourLabels { get; set; } = new(true);
+        public ToggleNode IslandRumourLiveTooltipScanEnabled { get; set; } = new(true);
+        public RangeNode<int> IslandRumourRefreshMs { get; set; } = new(500, 250, 15000);
+        public RangeNode<int> IslandRumourMaxLabels { get; set; } = new(3, 1, 3);
+        public RangeNode<int> IslandRumourLabelOffsetY { get; set; } = new(44, 10, 160);
+        public RangeNode<int> IslandRumourLabelSpacing { get; set; } = new(28, 22, 40);
+        public RangeNode<int> IslandRumourLabelFontSize { get; set; } = new(16, 13, 22);
+        public RangeNode<int> IslandRumourLabelMaxWidth { get; set; } = new(540, 420, 720);
+        public RangeNode<float> IslandRumourLabelBackgroundOpacity { get; set; } = new(0.92f, 0.15f, 1.0f);
+        public ColorNode IslandRumourTextColor { get; set; } = new(Color.FromArgb(255, 220, 80));
+        public ToggleNode IslandRumourUseIndividualColors { get; set; } = new(true);
+        public ToggleNode ShowIslandRumourRegionStats { get; set; } = new(true);
+        public ColorNode IslandRumourRegionStatsColor { get; set; } = new(Color.FromArgb(120, 220, 255));
+        public Dictionary<string, ColorNode> IslandRumourColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public int IslandRumourSettingsVersion { get; set; }
 
         public Dictionary<string, ToggleNode> MechanicHighlights { get; set; } = new(StringComparer.OrdinalIgnoreCase)
         {

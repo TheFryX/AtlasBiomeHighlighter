@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
 using System.IO;
 using System.Text;
 using System.Reflection;
+using System.Reflection.Emit;
 using ExileCore2;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
 using ExileCore2.Shared.Nodes;
@@ -66,6 +68,9 @@ namespace AtlasBiomeHighlighter
         
         private string[] _preferredMechanicTokensList = Array.Empty<string>();
         private HashSet<string> _preferredMechanicTokensExact = new(StringComparer.Ordinal);
+
+        private string[] _preferredRumourTokensList = Array.Empty<string>();
+        private HashSet<string> _preferredRumourTokensExact = new(StringComparer.Ordinal);
 
         
         private readonly Dictionary<string, string> _preferredTokenToTag = new(StringComparer.Ordinal);
@@ -161,21 +166,117 @@ namespace AtlasBiomeHighlighter
             catch { return string.Empty; }
         }
 
+        private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, Func<object, object?>>> DebugMemberAccessors = new();
+        private static readonly Func<object, object?> MissingDebugMemberAccessor = static _ => null;
+
         private static object? GetDebugMember(object? obj, string name)
         {
-            if (obj == null) return null;
-            var t = obj.GetType();
-            var p = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-            if (p != null && p.GetIndexParameters().Length == 0)
+            if (obj == null || string.IsNullOrEmpty(name))
+                return null;
+
+            var accessorsByName = DebugMemberAccessors.GetOrAdd(
+                obj.GetType(),
+                static _ => new ConcurrentDictionary<string, Func<object, object?>>(StringComparer.OrdinalIgnoreCase));
+            var accessor = accessorsByName.GetOrAdd(name, memberName => CreateDebugMemberAccessor(obj.GetType(), memberName));
+
+            try
             {
-                try { return p.GetValue(obj); } catch { return null; }
+                return accessor(obj);
             }
-            var f = t.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
-            if (f != null)
+            catch
             {
-                try { return f.GetValue(obj); } catch { return null; }
+                return null;
             }
-            return null;
+        }
+
+        private static Func<object, object?> CreateDebugMemberAccessor(Type declaringType, string name)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
+
+            var property = declaringType.GetProperty(name, flags);
+            if (property != null && property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null)
+                return CreateDebugPropertyAccessor(declaringType, property);
+
+            var field = declaringType.GetField(name, flags);
+            if (field != null)
+                return CreateDebugFieldAccessor(declaringType, field);
+
+            return MissingDebugMemberAccessor;
+        }
+
+        private static Func<object, object?> CreateDebugPropertyAccessor(Type declaringType, PropertyInfo property)
+        {
+            var getter = property.GetGetMethod(true)!;
+            if (!getter.IsPublic ||
+                property.PropertyType.IsByRef ||
+                property.PropertyType.IsPointer ||
+                property.PropertyType.IsByRefLike)
+            {
+                return obj => property.GetValue(obj);
+            }
+
+            try
+            {
+                var method = new DynamicMethod(
+                    $"AtlasBiomeHighlighter_get_{declaringType.Name}_{property.Name}",
+                    typeof(object),
+                    new[] { typeof(object) },
+                    typeof(AtlasBiomeHighlighter),
+                    true);
+                var il = method.GetILGenerator();
+                EmitDebugAccessorInstance(il, declaringType);
+                il.Emit(declaringType.IsValueType || !getter.IsVirtual ? OpCodes.Call : OpCodes.Callvirt, getter);
+                EmitDebugAccessorBox(il, property.PropertyType);
+                il.Emit(OpCodes.Ret);
+                return (Func<object, object?>)method.CreateDelegate(typeof(Func<object, object?>));
+            }
+            catch
+            {
+                return obj => property.GetValue(obj);
+            }
+        }
+
+        private static Func<object, object?> CreateDebugFieldAccessor(Type declaringType, FieldInfo field)
+        {
+            if (!field.IsPublic ||
+                field.FieldType.IsByRef ||
+                field.FieldType.IsPointer ||
+                field.FieldType.IsByRefLike)
+            {
+                return obj => field.GetValue(obj);
+            }
+
+            try
+            {
+                var method = new DynamicMethod(
+                    $"AtlasBiomeHighlighter_get_{declaringType.Name}_{field.Name}",
+                    typeof(object),
+                    new[] { typeof(object) },
+                    typeof(AtlasBiomeHighlighter),
+                    true);
+                var il = method.GetILGenerator();
+                EmitDebugAccessorInstance(il, declaringType);
+                il.Emit(OpCodes.Ldfld, field);
+                EmitDebugAccessorBox(il, field.FieldType);
+                il.Emit(OpCodes.Ret);
+                return (Func<object, object?>)method.CreateDelegate(typeof(Func<object, object?>));
+            }
+            catch
+            {
+                return obj => field.GetValue(obj);
+            }
+        }
+
+        private static void EmitDebugAccessorInstance(ILGenerator il, Type declaringType)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(declaringType.IsValueType ? OpCodes.Unbox : OpCodes.Castclass, declaringType);
+        }
+
+        private static void EmitDebugAccessorBox(ILGenerator il, Type valueType)
+        {
+            if (valueType.IsValueType)
+                il.Emit(OpCodes.Box, valueType);
         }
 
         private static void DumpObjectMembers(object? obj, StringBuilder sb, int depth, int maxDepth, HashSet<object> seen)
@@ -268,11 +369,76 @@ namespace AtlasBiomeHighlighter
 
         private void NormalizePreferredMapCatalogForCurrentAtlas()
         {
+            NormalizeIslandRumourSettings();
             NormalizePreferredMapDictionary();
             NormalizePreferredMapGroups();
             NormalizeFavoriteWaypointMaps();
             NormalizeTowerHighlightDictionaries();
             _preferredCacheHash = 0;
+        }
+
+        private void NormalizeIslandRumourSettings()
+        {
+            if (Settings.ShowIslandRumourRegionStats == null)
+                Settings.ShowIslandRumourRegionStats = new ToggleNode(true);
+
+            if (Settings.IslandRumourRegionStatsColor == null)
+                Settings.IslandRumourRegionStatsColor = new ColorNode(System.Drawing.Color.FromArgb(120, 220, 255));
+
+            if (Settings.IslandRumourLabelFontSize == null)
+                Settings.IslandRumourLabelFontSize = new RangeNode<int>(16, 13, 22);
+
+            if (Settings.IslandRumourLabelMaxWidth == null)
+                Settings.IslandRumourLabelMaxWidth = new RangeNode<int>(540, 420, 720);
+
+            if (Settings.IslandRumourLabelSpacing == null)
+                Settings.IslandRumourLabelSpacing = new RangeNode<int>(28, 22, 40);
+
+            if (Settings.IslandRumourLabelBackgroundOpacity == null)
+                Settings.IslandRumourLabelBackgroundOpacity = new RangeNode<float>(0.92f, 0.15f, 1.0f);
+
+            if (Settings.IslandRumourLiveTooltipScanEnabled == null)
+                Settings.IslandRumourLiveTooltipScanEnabled = new ToggleNode(false);
+
+            if (Settings.IslandRumourSettingsVersion >= 7)
+                return;
+
+            // The direct dictionary path is inexpensive, so reduce the old one-second default
+            // without overriding users who selected a different custom interval.
+            if (Settings.IslandRumourRefreshMs.Value == 1000)
+                Settings.IslandRumourRefreshMs.Value = 500;
+
+            if (Settings.IslandRumourSettingsVersion < 6)
+            {
+                if (Settings.IslandRumourMaxLabels.Value > 3)
+                    Settings.IslandRumourMaxLabels.Value = 3;
+
+                if (Settings.IslandRumourRefreshMs.Value >= 3000)
+                    Settings.IslandRumourRefreshMs.Value = 500;
+
+                // Version 6 replaces the tiny compact card with a readable four-column table.
+                // Recreate the range nodes so existing installations also receive the new bounds.
+                int migratedFontSize = Settings.IslandRumourLabelFontSize.Value <= 13
+                    ? 16
+                    : Math.Clamp(Settings.IslandRumourLabelFontSize.Value, 13, 22);
+                int migratedWidth = Settings.IslandRumourLabelMaxWidth.Value <= 420
+                    ? 540
+                    : Math.Clamp(Settings.IslandRumourLabelMaxWidth.Value, 420, 720);
+                int migratedRowHeight = Settings.IslandRumourLabelSpacing.Value <= 18
+                    ? 28
+                    : Math.Clamp(Settings.IslandRumourLabelSpacing.Value, 22, 40);
+                float migratedBackgroundOpacity = Math.Max(0.88f, Settings.IslandRumourLabelBackgroundOpacity.Value);
+
+                Settings.IslandRumourLabelFontSize = new RangeNode<int>(migratedFontSize, 13, 22);
+                Settings.IslandRumourLabelMaxWidth = new RangeNode<int>(migratedWidth, 420, 720);
+                Settings.IslandRumourLabelSpacing = new RangeNode<int>(migratedRowHeight, 22, 40);
+                Settings.IslandRumourLabelBackgroundOpacity = new RangeNode<float>(migratedBackgroundOpacity, 0.15f, 1.0f);
+            }
+
+            // Version 7 makes the inexpensive AtlasButtonNode.Rumors path the default and moves
+            // the expensive child/tooltip walker behind an explicit opt-in switch.
+            EnsureIslandRumourColorSettings();
+            Settings.IslandRumourSettingsVersion = 7;
         }
 
         private void NormalizePreferredMapDictionary()
@@ -305,6 +471,7 @@ namespace AtlasBiomeHighlighter
                 RemoveHashSetValue(group.Maps, Utility.RemovedPrecursorTowerName);
 
                 group.Mechanics ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                group.Rumours ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
         }
 
@@ -420,7 +587,9 @@ namespace AtlasBiomeHighlighter
         {
             _atlasNodes = Array.Empty<AtlasNodeDescription>();
             _visibleNodes.Clear();
+            ClearIslandRumourCache();
             ResetPreferredGuideDiscovery();
+            ResetNavigationTargetAnchors();
             _atlasRefreshSw.Restart();
             _screenRefreshSw.Restart();
         }
@@ -450,6 +619,14 @@ namespace AtlasBiomeHighlighter
                             h = unchecked(h * 31 + StringComparer.OrdinalIgnoreCase.GetHashCode("mechanic:" + key));
                         }
                     }
+                    if (g.Rumours != null)
+                    {
+                        foreach (var key in g.Rumours)
+                        {
+                            enabledCount++;
+                            h = unchecked(h * 31 + StringComparer.OrdinalIgnoreCase.GetHashCode("rumour:" + key));
+                        }
+                    }
                 }
             }
             h = unchecked(h * 31 + enabledCount);
@@ -460,10 +637,12 @@ namespace AtlasBiomeHighlighter
             
             _preferredTokensExact.Clear();
             _preferredMechanicTokensExact.Clear();
+            _preferredRumourTokensExact.Clear();
             _preferredTokenToTag.Clear();
             _preferredTokenToDisplayName.Clear();
             var list = new List<string>(enabledCount);
             var mechanicList = new List<string>(enabledCount);
+            var rumourList = new List<string>(enabledCount);
             if (groups != null)
             {
                 for (int gi = 0; gi < groups.Count; gi++)
@@ -497,10 +676,26 @@ namespace AtlasBiomeHighlighter
                             SetPreferredTokenDisplay(token, key);
                         }
                     }
+
+                    if (g.Rumours != null)
+                    {
+                        foreach (var key in g.Rumours)
+                        {
+                            var canonical = GetIslandRumourCanonicalName(key);
+                            var token = Utility.NormalizeToken(canonical);
+                            if (token.Length == 0) continue;
+
+                            if (_preferredRumourTokensExact.Add(token))
+                                rumourList.Add(token);
+
+                            SetPreferredTokenDisplay(token, canonical);
+                        }
+                    }
                 }
             }
             _preferredTokensList = list.Count == 0 ? Array.Empty<string>() : list.ToArray();
             _preferredMechanicTokensList = mechanicList.Count == 0 ? Array.Empty<string>() : mechanicList.ToArray();
+            _preferredRumourTokensList = rumourList.Count == 0 ? Array.Empty<string>() : rumourList.ToArray();
         }
 
         private void SetPreferredTokenDisplay(string token, string? displayName)
@@ -578,7 +773,15 @@ namespace AtlasBiomeHighlighter
         {
             using var tickProfile = ProfileScope("Tick total");
             _atlasPanel = GameController?.IngameState?.IngameUi?.WorldMap?.AtlasPanel;
-            if (_atlasPanel == null || !_atlasPanel.IsVisible) return;
+            if (_atlasPanel == null || !_atlasPanel.IsVisible)
+            {
+                if (_islandRumourSnapshots.Count != 0 ||
+                    _islandRumourCameraAnchorNode != null)
+                {
+                    ClearIslandRumourCache();
+                }
+                return;
+            }
 
             
             
@@ -589,6 +792,11 @@ namespace AtlasBiomeHighlighter
 
             
             UpdateViewportSize();
+
+            using (ProfileScope("Island Rumours cache"))
+            {
+                UpdateIslandRumourCache();
+            }
 
             
             using (ProfileScope("Preferred guide discovery"))
