@@ -35,6 +35,10 @@ namespace AtlasBiomeHighlighter
             DrawTowerRangeSettings(s);
             DrawSpecialHighlightSettings(s);
             DrawDebugSettings(s);
+
+            // Keep the shared hotkey capture popup alive regardless of which
+            // settings section initiated the capture.
+            DrawWaypointHotkeyCapturePopup();
         }
 
         private void DrawGeneralSettings(AtlasBiomeSettings s)
@@ -90,6 +94,56 @@ namespace AtlasBiomeHighlighter
                 return;
 
             ImGui.Indent();
+
+            ImGui.TextDisabled("Label style");
+            bool modernStyle = s.ModernLabelCards.Value;
+            if (ImGui.RadioButton("Classic", !modernStyle))
+            {
+                s.ModernLabelCards.Value = false;
+                modernStyle = false;
+            }
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Atlas Signal", modernStyle))
+            {
+                s.ModernLabelCards.Value = true;
+                modernStyle = true;
+            }
+
+            if (s.ModernLabelCards.Value)
+            {
+                ImGui.TextDisabled("Constellation-style signal rails integrated with Atlas nodes.");
+                { float v = s.ModernLabelScale.Value; if (ImGui.SliderFloat("Label scale", ref v, s.ModernLabelScale.Min, s.ModernLabelScale.Max, "%.2f")) s.ModernLabelScale.Value = v; }
+                { float v = s.ModernLabelBackgroundOpacity.Value; if (ImGui.SliderFloat("Signal plate opacity", ref v, s.ModernLabelBackgroundOpacity.Min, s.ModernLabelBackgroundOpacity.Max, "%.2f")) s.ModernLabelBackgroundOpacity.Value = v; }
+                { int v = s.ModernLabelMaxWidth.Value; if (ImGui.SliderInt("Maximum label width", ref v, s.ModernLabelMaxWidth.Min, s.ModernLabelMaxWidth.Max)) s.ModernLabelMaxWidth.Value = v; }
+                { float v = s.ModernLabelPreloadViewportScale.Value; if (ImGui.SliderFloat("Preload viewport scale", ref v, s.ModernLabelPreloadViewportScale.Min, s.ModernLabelPreloadViewportScale.Max, "%.2f")) s.ModernLabelPreloadViewportScale.Value = v; }
+                { bool v = s.ModernLabelReadableBiomeBadge.Value; if (ImGui.Checkbox("Readable biome badge", ref v)) s.ModernLabelReadableBiomeBadge.Value = v; }
+                { bool v = s.ModernLabelUseBiomeTitleColor.Value; if (ImGui.Checkbox("Color map names by biome", ref v)) s.ModernLabelUseBiomeTitleColor.Value = v; }
+                { bool v = s.ModernLabelSmoothReveal.Value; if (ImGui.Checkbox("Smooth signal reveal", ref v)) s.ModernLabelSmoothReveal.Value = v; }
+                { bool v = s.ModernLabelPrioritySignalColors.Value; if (ImGui.Checkbox("Priority-colored signals", ref v)) s.ModernLabelPrioritySignalColors.Value = v; }
+                { bool v = s.ModernLabelAdaptiveTextContrast.Value; if (ImGui.Checkbox("Adaptive label contrast", ref v)) s.ModernLabelAdaptiveTextContrast.Value = v; }
+                { bool v = s.ModernLabelDeclutter.Value; if (ImGui.Checkbox("Avoid overlapping labels", ref v)) s.ModernLabelDeclutter.Value = v; }
+                if (s.ModernLabelDeclutter.Value)
+                {
+                    int v = s.ModernLabelSpacing.Value;
+                    if (ImGui.SliderInt("Label spacing", ref v, s.ModernLabelSpacing.Min, s.ModernLabelSpacing.Max))
+                        s.ModernLabelSpacing.Value = v;
+                }
+                { bool v = s.ModernLabelConnector.Value; if (ImGui.Checkbox("Extended signal connector", ref v)) s.ModernLabelConnector.Value = v; }
+                { bool v = s.ModernLabelAutoCompact.Value; if (ImGui.Checkbox("Overview mode when zoomed out", ref v)) s.ModernLabelAutoCompact.Value = v; }
+                if (s.ModernLabelAutoCompact.Value)
+                {
+                    float v = s.ModernLabelCompactScaleThreshold.Value;
+                    if (ImGui.SliderFloat("Overview below Atlas scale", ref v, s.ModernLabelCompactScaleThreshold.Min, s.ModernLabelCompactScaleThreshold.Max, "%.2f"))
+                        s.ModernLabelCompactScaleThreshold.Value = v;
+                    bool hideOrdinary = s.ModernLabelHideOrdinaryWhenZoomedOut.Value;
+                    if (ImGui.Checkbox("Overview: show only important labels", ref hideOrdinary))
+                        s.ModernLabelHideOrdinaryWhenZoomedOut.Value = hideOrdinary;
+                }
+                DrawColorEdit("Signal plate", s.ModernLabelBackgroundColor.Value, c => s.ModernLabelBackgroundColor.Value = c);
+                DrawColorEdit("Muted signal rail", s.ModernLabelBorderColor.Value, c => s.ModernLabelBorderColor.Value = c);
+                ImGui.Separator();
+            }
+
             { int v = s.LabelOffset.Value; if (ImGui.SliderInt("Label vertical offset", ref v, s.LabelOffset.Min, s.LabelOffset.Max)) s.LabelOffset.Value = v; }
             { bool v = s.LabelUseBiomeColor.Value; if (ImGui.Checkbox("Use biome color for text", ref v)) s.LabelUseBiomeColor.Value = v; }
             DrawColorEdit("Label text color", s.LabelTextColor.Value, c => s.LabelTextColor.Value = c, false);
@@ -165,6 +219,12 @@ namespace AtlasBiomeHighlighter
             ImGui.Indent();
             { bool v = s.IslandRumoursEnabled.Value; if (ImGui.Checkbox("Enable Island Rumours", ref v)) s.IslandRumoursEnabled.Value = v; }
             { bool v = s.ShowIslandRumourLabels.Value; if (ImGui.Checkbox("Show tables near atlas buttons", ref v)) s.ShowIslandRumourLabels.Value = v; }
+            DrawWaypointHotkeySelector(
+                "Toggle Rumours tables",
+                s.ToggleIslandRumourTablesHotkey,
+                "IslandRumoursToggleHotkeyCapturePopup",
+                "default: F7");
+            ImGui.TextDisabled("The hotkey only hides/shows the tables; Rumours data stays cached and keeps refreshing.");
             {
                 bool v = s.IslandRumourLiveTooltipScanEnabled.Value;
                 if (ImGui.Checkbox("Live tooltip scan (max 3 entries)", ref v))
@@ -184,6 +244,7 @@ namespace AtlasBiomeHighlighter
             DrawColorEdit("Rumour text", s.IslandRumourTextColor.Value, c => s.IslandRumourTextColor.Value = c, false);
             { bool v = s.IslandRumourUseIndividualColors.Value; if (ImGui.Checkbox("Use per-rumour colors", ref v)) s.IslandRumourUseIndividualColors.Value = v; }
             { bool v = s.ShowIslandRumourRegionStats.Value; if (ImGui.Checkbox("Show region map / Grand Expedition counts", ref v)) s.ShowIslandRumourRegionStats.Value = v; }
+            { bool v = s.IslandRumourRowAccents.Value; if (ImGui.Checkbox("Colored row accents", ref v)) s.IslandRumourRowAccents.Value = v; }
             DrawColorEdit("Region stats text", s.IslandRumourRegionStatsColor.Value, c => s.IslandRumourRegionStatsColor.Value = c, false);
             { int v = s.IslandRumourRefreshMs.Value; if (ImGui.SliderInt("Button cache refresh (ms)", ref v, s.IslandRumourRefreshMs.Min, s.IslandRumourRefreshMs.Max)) s.IslandRumourRefreshMs.Value = v; }
             { int v = s.IslandRumourLabelOffsetY.Value; if (ImGui.SliderInt("Table distance from button", ref v, s.IslandRumourLabelOffsetY.Min, s.IslandRumourLabelOffsetY.Max)) s.IslandRumourLabelOffsetY.Value = v; }
@@ -469,6 +530,7 @@ namespace AtlasBiomeHighlighter
                 DrawPreferredGuideHotkeySelector(s);
                 { int v = s.PreferredGuideThickness.Value; if (ImGui.SliderInt("Guide thickness", ref v, 1, 8)) s.PreferredGuideThickness.Value = v; }
                 { int v = s.PreferredArrowSize.Value; if (ImGui.SliderInt("Arrow size", ref v, 6, 28)) s.PreferredArrowSize.Value = v; }
+                { bool v = s.PreferredGuideTargetPulse.Value; if (ImGui.Checkbox("Pulse visible guide targets", ref v)) s.PreferredGuideTargetPulse.Value = v; }
                 { int v = s.PreferredGuideLimit.Value; if (ImGui.SliderInt("Max guide count", ref v, 5, 200)) s.PreferredGuideLimit.Value = v; }
                 ImGui.Unindent();
             }
@@ -515,7 +577,6 @@ namespace AtlasBiomeHighlighter
                 DrawWaypointHotkeySelector("Remove hovered waypoint", s.DeleteWaypointHotkey, "WaypointDeleteHotkeyCapturePopup", "default: Delete");
                 DrawWaypointHotkeySelector("Toggle Navigator window", s.ToggleWaypointPanelHotkey, "WaypointPanelHotkeyCapturePopup", "default: End");
                 DrawWaypointHotkeySelector("Toggle shortest path", s.ToggleShortestPathHotkey, "WaypointShortestPathHotkeyCapturePopup", "default: PageDown");
-                DrawWaypointHotkeyCapturePopup();
                 ImGui.TextDisabled("Click a key button, then press a new key. Esc cancels, Clear disables.");
                 ImGui.Unindent();
             }
@@ -701,7 +762,11 @@ namespace AtlasBiomeHighlighter
             { bool v = s.DebugPreferredMaps.Value; if (ImGui.Checkbox("Debug Preferred map hits to file", ref v)) s.DebugPreferredMaps.Value = v; }
             { bool v = s.DebugPreferredDetails.Value; if (ImGui.Checkbox("Debug include reflected node details", ref v)) s.DebugPreferredDetails.Value = v; }
             { bool v = s.DebugNavigationTargets.Value; if (ImGui.Checkbox("Debug navigation targets / arrows", ref v)) s.DebugNavigationTargets.Value = v; }
+            { bool v = s.DebugSignalPositions.Value; if (ImGui.Checkbox("Debug Atlas Signal positions", ref v)) s.DebugSignalPositions.Value = v; }
+            if (ImGui.Button("Clear Signal position log"))
+                ClearAtlasSignalPositionDebugLog();
             ImGui.TextDisabled("Debug logs: AtlasBiomeHighlighter.PreferredDebug.log / NavigationDebug.log / JumpTrace.txt");
+            ImGui.TextDisabled("Signal position log: AtlasBiomeHighlighter.SignalPositionDebug.txt");
             ImGui.TextDisabled("Spike profiler log: AtlasBiomeHighlighter.PerformanceSpikes.txt");
 
             ImGui.Separator();

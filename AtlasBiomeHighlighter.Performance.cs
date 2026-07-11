@@ -22,6 +22,9 @@ namespace AtlasBiomeHighlighter
         private const int VisibleCacheBuildBudgetPerTick = 96;
         private const int VisibleCacheBuildMinItemsBeforeTimeSlice = 16;
         private const double VisibleCacheBuildTimeBudgetMs = 2.25;
+        private const int VisibleCacheLowLatencyBuildBudgetPerTick = 512;
+        private const int VisibleCacheLowLatencyMinItemsBeforeTimeSlice = 64;
+        private const double VisibleCacheLowLatencyTimeBudgetMs = 4.0;
 
         
         private Dictionary<(int x, int y), NodeStatus> _statusByCoord = new(1024);
@@ -152,13 +155,26 @@ namespace AtlasBiomeHighlighter
                 _visibleCacheBuildInProgress = true;
             }
 
-            
-            
+            bool lowLatencyLabels = IsLowLatencyVisibleCacheEnabled();
+            int buildBudget = lowLatencyLabels
+                ? VisibleCacheLowLatencyBuildBudgetPerTick
+                : VisibleCacheBuildBudgetPerTick;
+            int minItemsBeforeTimeSlice = lowLatencyLabels
+                ? VisibleCacheLowLatencyMinItemsBeforeTimeSlice
+                : VisibleCacheBuildMinItemsBeforeTimeSlice;
+            double timeBudgetMs = lowLatencyLabels
+                ? VisibleCacheLowLatencyTimeBudgetMs
+                : VisibleCacheBuildTimeBudgetMs;
+            int timeSliceMask = lowLatencyLabels ? 31 : 15;
+            bool needMechanicInfo =
+                HasAnyMechanicHighlightEnabled() ||
+                (Settings.HighlightPreferredMaps.Value && _preferredMechanicTokensExact.Count != 0);
+
             long buildStartTimestamp = Stopwatch.GetTimestamp();
             int processed = 0;
             int i = _visibleCacheBuildIndex;
 
-            while (i < _atlasNodes.Length && processed < VisibleCacheBuildBudgetPerTick)
+            while (i < _atlasNodes.Length && processed < buildBudget)
             {
                 var nd = _atlasNodes[i];
                 i++;
@@ -167,15 +183,14 @@ namespace AtlasBiomeHighlighter
                 if (nd?.Element is null)
                     continue;
 
-                bool unlocked = Utility.TryIsUnlocked(nd, out var uu) && uu;
-                bool visited = Utility.TryIsVisited(nd, out var vv) && vv;
-                bool completed = Utility.IsMapCompleted(nd);
-
-                var c = nd.Coordinate;
-                _statusByCoordNext[(c.X, c.Y)] = new NodeStatus(unlocked, visited, completed);
-
-                if (Utility.IsInScreen(nd, BorderX, BorderY))
+                if (IsInVisibleCacheRange(nd, lowLatencyLabels))
                 {
+                    bool unlocked = Utility.TryIsUnlocked(nd, out var uu) && uu;
+                    bool visited = Utility.TryIsVisited(nd, out var vv) && vv;
+                    bool completed = Utility.IsMapCompleted(nd);
+
+                    var c = nd.Coordinate;
+                    _statusByCoordNext[(c.X, c.Y)] = new NodeStatus(unlocked, visited, completed);
                     _visibleNodesNext.Add(nd);
 
                     
@@ -202,13 +217,18 @@ namespace AtlasBiomeHighlighter
                     if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Utility.TryGetUniqueNameFromId(nd, out var un) && !string.IsNullOrWhiteSpace(un))
                         uniqueName = un;
 
-                    var mechanicNames = Utility.TryGetMechanicNames(nd);
-                    var mechanicArray = mechanicNames.Count == 0
-                        ? Array.Empty<string>()
-                        : mechanicNames.ToArray();
-                    var mechanicTokenArray = mechanicArray.Length == 0
-                        ? Array.Empty<string>()
-                        : mechanicArray.Select(Utility.NormalizeToken).Where(t => t.Length != 0).Distinct(StringComparer.Ordinal).ToArray();
+                    string[] mechanicArray = Array.Empty<string>();
+                    string[] mechanicTokenArray = Array.Empty<string>();
+                    if (needMechanicInfo)
+                    {
+                        var mechanicNames = Utility.TryGetMechanicNames(nd);
+                        mechanicArray = mechanicNames.Count == 0
+                            ? Array.Empty<string>()
+                            : mechanicNames.ToArray();
+                        mechanicTokenArray = mechanicArray.Length == 0
+                            ? Array.Empty<string>()
+                            : mechanicArray.Select(Utility.NormalizeToken).Where(t => t.Length != 0).Distinct(StringComparer.Ordinal).ToArray();
+                    }
 
                     _visibleNodeInfosNext.Add(new NodeRenderInfo(
                         nd,
@@ -228,10 +248,10 @@ namespace AtlasBiomeHighlighter
                         mechanicTokenArray));
                 }
 
-                if (processed >= VisibleCacheBuildMinItemsBeforeTimeSlice && (processed & 15) == 0)
+                if (processed >= minItemsBeforeTimeSlice && (processed & timeSliceMask) == 0)
                 {
                     double elapsedMs = (Stopwatch.GetTimestamp() - buildStartTimestamp) * 1000.0 / Stopwatch.Frequency;
-                    if (elapsedMs >= VisibleCacheBuildTimeBudgetMs)
+                    if (elapsedMs >= timeBudgetMs)
                         break;
                 }
             }
@@ -243,6 +263,43 @@ namespace AtlasBiomeHighlighter
             PublishVisibleCaches();
             ResetVisibleCacheBuild();
             return true;
+        }
+
+        private bool IsLowLatencyVisibleCacheEnabled()
+        {
+            return Settings.ShowLabels.Value && Settings.ModernLabelCards.Value;
+        }
+
+        private bool IsInVisibleCacheRange(AtlasNodeDescription node, bool useModernLabelPreload)
+        {
+            try
+            {
+                if (node?.Element is null)
+                    return false;
+
+                var center = node.Element.Center;
+                int width = BorderX;
+                int height = BorderY;
+
+                if (!useModernLabelPreload)
+                    return center.X > 0 && center.X < width && center.Y > 0 && center.Y < height;
+
+                float scale = Math.Clamp(
+                    Settings.ModernLabelPreloadViewportScale.Value,
+                    Settings.ModernLabelPreloadViewportScale.Min,
+                    Settings.ModernLabelPreloadViewportScale.Max);
+                float extraX = width * Math.Max(0f, scale - 1f) * 0.5f;
+                float extraY = height * Math.Max(0f, scale - 1f) * 0.5f;
+
+                return center.X > -extraX &&
+                       center.X < width + extraX &&
+                       center.Y > -extraY &&
+                       center.Y < height + extraY;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void PublishVisibleCaches()
@@ -285,7 +342,12 @@ namespace AtlasBiomeHighlighter
                     if (!_nodeByCoord.TryGetValue(dstKey, out var dst) || dst?.Element is null)
                         continue;
 
-                    TryGetStatus(dstKey, out var dstUnlocked, out var dstVisited, out _);
+                    if (!TryGetStatus(dstKey, out var dstUnlocked, out var dstVisited, out _))
+                    {
+                        dstUnlocked = Utility.TryIsUnlocked(dst, out var du) && du;
+                        dstVisited = Utility.TryIsVisited(dst, out var dv) && dv;
+                    }
+
                     _visibleConnectionSegments.Add(new ConnectionRenderSegment(
                         nd,
                         dst,

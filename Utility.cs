@@ -384,36 +384,166 @@ namespace AtlasBiomeHighlighter
 
         public static Biome TryGetBiome(AtlasNodeDescription nd)
         {
-            
-            
-            
-            var candidate = GetMember(nd.Element, "Biome");
-            var name = ExtractString(candidate);
-            var parsed = BiomeUtils.ParseOrUnknown(name);
-            if (parsed != Biome.Unknown) return parsed;
+            if (nd?.Element is null)
+                return Biome.Unknown;
 
-            parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Id")));
-            if (parsed != Biome.Unknown) return parsed;
+            // The live AtlasPanelNode biome is the most precise source and must
+            // always keep priority over static map metadata.
+            var directBiome = GetMember(nd.Element, "Biome");
+            var parsed = TryParseBiomeObject(directBiome);
+            if (parsed != Biome.Unknown)
+                return parsed;
 
-            parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Name")));
-            if (parsed != Biome.Unknown) return parsed;
+            // Some Atlas nodes expose an empty/stale Biome object while the same
+            // information is already available on Map.Biomes. This happens most
+            // often while the Atlas UI is virtualising or rebuilding a node.
+            var map = GetMember(nd.Element, "Map");
+            parsed = TryParseBiomeObject(GetMember(map, "Biome"));
+            if (parsed != Biome.Unknown)
+                return parsed;
 
-            
-            foreach (var hopName in new[] {"AtlasPanelNode", "Node", "Area"})
+            parsed = TryParseBiomeCollection(GetMember(map, "Biomes"), directBiome);
+            if (parsed != Biome.Unknown)
+                return parsed;
+
+            // Keep the older defensive fallbacks for alternate wrappers used by
+            // different Atlas states and ExileCore2 versions.
+            foreach (var hopName in new[] { "AtlasPanelNode", "Node", "Area", "AtlasEntry" })
             {
                 var hop = GetMember(nd.Element, hopName);
-                if (hop == null) continue;
-                var n2 = ExtractString(GetMember(hop, "Biome"));
-                var p2 = BiomeUtils.ParseOrUnknown(n2);
-                if (p2 != Biome.Unknown) return p2;
+                if (hop == null)
+                    continue;
+
+                parsed = TryParseBiomeObject(GetMember(hop, "Biome"));
+                if (parsed != Biome.Unknown)
+                    return parsed;
+
+                parsed = TryParseBiomeCollection(GetMember(hop, "Biomes"), directBiome);
+                if (parsed != Biome.Unknown)
+                    return parsed;
             }
 
-            
-            var id = ExtractString(GetMember(nd.Element, "Id")) ?? ExtractString(GetMember(GetMember(nd.Element,"Area"), "Id"));
-            var pid = BiomeUtils.ParseOrUnknown(id);
-            if (pid != Biome.Unknown) return pid;
+            // Area metadata can be nested under Map rather than directly under
+            // AtlasPanelNode, so inspect both paths before falling back to IDs.
+            var mapArea = GetMember(map, "Area");
+            parsed = TryParseBiomeObject(GetMember(mapArea, "Biome"));
+            if (parsed != Biome.Unknown)
+                return parsed;
+
+            var id = ExtractString(GetMember(nd.Element, "Id"))
+                     ?? ExtractString(GetMember(GetMember(nd.Element, "Area"), "Id"))
+                     ?? ExtractString(GetMember(mapArea, "Id"));
+            return BiomeUtils.ParseOrUnknown(id);
+        }
+
+        private static Biome TryParseBiomeObject(object? candidate)
+        {
+            if (candidate is null)
+                return Biome.Unknown;
+
+            var parsed = BiomeUtils.ParseOrUnknown(ExtractString(candidate));
+            if (parsed != Biome.Unknown)
+                return parsed;
+
+            parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Id")));
+            if (parsed != Biome.Unknown)
+                return parsed;
+
+            parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(candidate, "Name")));
+            if (parsed != Biome.Unknown)
+                return parsed;
+
+            // Unwrap lightweight cache/frame wrappers without recursively walking
+            // arbitrary UI trees.
+            foreach (var memberName in new[] { "Value", "Current", "Item" })
+            {
+                var wrapped = GetMember(candidate, memberName);
+                if (wrapped is null || ReferenceEquals(wrapped, candidate))
+                    continue;
+
+                parsed = BiomeUtils.ParseOrUnknown(ExtractString(wrapped));
+                if (parsed != Biome.Unknown)
+                    return parsed;
+
+                parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(wrapped, "Id")));
+                if (parsed != Biome.Unknown)
+                    return parsed;
+
+                parsed = BiomeUtils.ParseOrUnknown(ExtractString(GetMember(wrapped, "Name")));
+                if (parsed != Biome.Unknown)
+                    return parsed;
+            }
 
             return Biome.Unknown;
+        }
+
+        private static Biome TryParseBiomeCollection(object? collection, object? preferredBiome)
+        {
+            if (collection is not System.Collections.IEnumerable enumerable)
+                return Biome.Unknown;
+
+            long preferredAddress = TryGetObjectAddress(preferredBiome);
+            Biome singleBiome = Biome.Unknown;
+
+            try
+            {
+                foreach (var entry in enumerable)
+                {
+                    if (entry is null)
+                        continue;
+
+                    object value = GetMember(entry, "Value") ?? entry;
+                    var parsed = TryParseBiomeObject(value);
+                    if (parsed == Biome.Unknown)
+                        continue;
+
+                    if (preferredAddress != 0 && TryGetObjectAddress(value) == preferredAddress)
+                        return parsed;
+
+                    if (singleBiome == Biome.Unknown)
+                    {
+                        singleBiome = parsed;
+                        continue;
+                    }
+
+                    // Static map metadata can theoretically list multiple allowed
+                    // biomes. In that case it is safer to keep the result unknown
+                    // than to paint the node with an arbitrary first colour.
+                    if (singleBiome != parsed)
+                        return Biome.Unknown;
+                }
+            }
+            catch
+            {
+                return Biome.Unknown;
+            }
+
+            return singleBiome;
+        }
+
+        private static long TryGetObjectAddress(object? value)
+        {
+            if (value is null)
+                return 0;
+
+            try
+            {
+                var raw = GetMember(value, "Address");
+                return raw switch
+                {
+                    long address => address,
+                    ulong address when address <= long.MaxValue => (long)address,
+                    int address => address,
+                    uint address => address,
+                    nint address => (long)address,
+                    nuint address when address <= (nuint)long.MaxValue => (long)address,
+                    _ => 0
+                };
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         [System.Flags]

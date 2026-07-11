@@ -109,6 +109,13 @@ namespace AtlasBiomeHighlighter
 
             bool anyMechanicHighlightsEnabled = HasAnyMechanicHighlightEnabled();
             bool anyTowerHighlightsEnabled = HasAnyTowerHighlightEnabled();
+            ImDrawListPtr modernLabelDrawList = default;
+            if (Settings.ShowLabels.Value && Settings.ModernLabelCards.Value)
+            {
+                modernLabelDrawList = ImGui.GetBackgroundDrawList();
+                BeginModernNodeLabels();
+                PrepareAtlasSignalOriginCollisionGuard();
+            }
 
             using (ProfileScope("Render node overlays"))
             {
@@ -204,7 +211,23 @@ namespace AtlasBiomeHighlighter
                 var baseColor = colorNode?.Value ?? Settings.LabelTextColor.Value;
                 var ringColor = Utility.WithOpacity(baseColor, Settings.Opacity.Value);
                 
-                var center = new Vector2(info.Node.Element.Center.X, info.Node.Element.Center.Y);
+                // Element.Center is a live memory-backed property. Read it once so X and Y,
+                // every ring and the queued Atlas Signal label use one coherent frame snapshot.
+                var centerValue = nd.Element.Center;
+                var center = new Vector2(centerValue.X, centerValue.Y);
+                if (Settings.ShowLabels.Value && Settings.ModernLabelCards.Value)
+                {
+                    string? placeholderReason = IsInvalidAtlasSignalPlaceholder(info, center)
+                        ? "known-placeholder-geometry"
+                        : IsAtlasSignalOriginCollision(info, center)
+                            ? "origin-collision"
+                            : null;
+                    if (placeholderReason != null)
+                    {
+                        RecordFilteredAtlasSignalPlaceholder(info, center, placeholderReason);
+                        continue;
+                    }
+                }
                 var radius = Settings.NodeRadius.Value;
                 var thickness = Settings.RingThickness.Value;
 
@@ -217,6 +240,13 @@ namespace AtlasBiomeHighlighter
                     (center.X < -overlayPadding || center.Y < -overlayPadding ||
                      center.X > displaySize.X + overlayPadding || center.Y > displaySize.Y + overlayPadding))
                     renderOverlay = false;
+
+                bool modernLabelAnchorVisible = !Settings.ModernLabelCards.Value || IsModernLabelAnchorInsideViewport(center);
+                if (!modernLabelAnchorVisible)
+                    renderMapNameLabelOnly = false;
+
+                if (!renderOverlay && !renderMapNameLabelOnly)
+                    continue;
 
                 int extra = 0;
                 bool nonMechanicSpecialWanted = specialWanted && !mechanicWanted && !towerWanted;
@@ -292,100 +322,120 @@ namespace AtlasBiomeHighlighter
                 if (Settings.ShowLabels.Value)
                 {
                     long __labelsStart = profileRenderSections ? Stopwatch.GetTimestamp() : 0;
-                    string text;
-                    bool labelContainsMapName = false;
-                    bool hasMapName = !string.IsNullOrWhiteSpace(info.MapName);
 
-                    if (biomeVisible && hasMapName)
+                    if (Settings.ModernLabelCards.Value)
                     {
-                        
-                        
-                        var mapNameText = Settings.ShowMapStatus.Value && Settings.ShowMapNames.Value
-                            ? $"{GetMapStatusPrefix(info.Completed, info.Attempted, info.Locked, info.Visited, info.Unlocked)} - {info.MapName}"
-                            : info.MapName;
-                        text = $"{mapNameText} - {info.BiomeDisplay}";
-                        labelContainsMapName = true;
-                    }
-                    else if (Settings.PreferMapNameForDeadly.Value &&
-                        (sflags & Utility.SpecialFlags.DeadlyBoss) != 0 &&
-                        hasMapName)
-                    {
-                        text = info.MapName!;
-                        labelContainsMapName = true;
-                    }
-                    else if (preferredWanted && !string.IsNullOrWhiteSpace(preferredDisplayName) && !hasMapName)
-                    {
-                        text = preferredDisplayName;
-                        labelContainsMapName = true;
-                    }
-                    else if (Settings.ShowUniqueNameOnLabel.Value &&
-                             (sflags & Utility.SpecialFlags.UniqueMap) != 0 &&
-                             !string.IsNullOrWhiteSpace(info.UniqueName))
-                    {
-                        text = info.UniqueName!;
+                        QueueModernNodeLabel(
+                            info,
+                            center,
+                            radius,
+                            baseColor,
+                            biomeVisible,
+                            preferredWanted,
+                            preferredMatchedToken,
+                            preferredDisplayName,
+                            mechanicWanted,
+                            towerWanted,
+                            highlightedTowerName);
                     }
                     else
                     {
-                        if (Settings.ShowMapNames.Value && hasMapName)
+                        string text;
+                        bool labelContainsMapName = false;
+                        bool hasMapName = !string.IsNullOrWhiteSpace(info.MapName);
+
+                        if (biomeVisible && hasMapName)
                         {
-                            
-                            
-                            var mapNameText = info.MapName!;
-                            text = Settings.ShowMapStatus.Value
-                                ? $"{GetMapStatusPrefix(info.Completed, info.Attempted, info.Locked, info.Visited, info.Unlocked)} - {mapNameText}"
-                                : mapNameText;
+                        
+                        
+                            var mapNameText = Settings.ShowMapStatus.Value && Settings.ShowMapNames.Value
+                                ? $"{GetMapStatusPrefix(info.Completed, info.Attempted, info.Locked, info.Visited, info.Unlocked)} - {info.MapName}"
+                                : info.MapName;
+                            text = $"{mapNameText} - {info.BiomeDisplay}";
                             labelContainsMapName = true;
+                        }
+                        else if (Settings.PreferMapNameForDeadly.Value &&
+                            (sflags & Utility.SpecialFlags.DeadlyBoss) != 0 &&
+                            hasMapName)
+                        {
+                            text = info.MapName!;
+                            labelContainsMapName = true;
+                        }
+                        else if (preferredWanted && !string.IsNullOrWhiteSpace(preferredDisplayName) && !hasMapName)
+                        {
+                            text = preferredDisplayName;
+                            labelContainsMapName = true;
+                        }
+                        else if (Settings.ShowUniqueNameOnLabel.Value &&
+                                 (sflags & Utility.SpecialFlags.UniqueMap) != 0 &&
+                                 !string.IsNullOrWhiteSpace(info.UniqueName))
+                        {
+                            text = info.UniqueName!;
                         }
                         else
                         {
-                            text = info.BiomeDisplay;
+                            if (Settings.ShowMapNames.Value && hasMapName)
+                            {
+                            
+                            
+                                var mapNameText = info.MapName!;
+                                text = Settings.ShowMapStatus.Value
+                                    ? $"{GetMapStatusPrefix(info.Completed, info.Attempted, info.Locked, info.Visited, info.Unlocked)} - {mapNameText}"
+                                    : mapNameText;
+                                labelContainsMapName = true;
+                            }
+                            else
+                            {
+                                text = info.BiomeDisplay;
+                            }
                         }
-                    }
 
                     
                     
                     
                     
 
-                    if (Settings.ShowSpecialTag.Value)
-                    {
-                        if ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0) text += " [Deadly]";
-                        if ((sflags & Utility.SpecialFlags.MomentofZen) != 0) text += " [Moment Of Zen]";
-                        if ((sflags & Utility.SpecialFlags.Cleansed) != 0) text += " [Cleansed]";
-                        if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
-                        if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0) text += " [Abyss]";
-                        if ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0) text += " [Expedition]";
-                        foreach (var mechanicName in mechanicNames)
+                        if (Settings.ShowSpecialTag.Value)
                         {
-                            if (IsMechanicHighlightEnabled(mechanicName))
-                                text += " [" + mechanicName + "]";
+                            if ((sflags & Utility.SpecialFlags.DeadlyBoss) != 0) text += " [Deadly]";
+                            if ((sflags & Utility.SpecialFlags.MomentofZen) != 0) text += " [Moment Of Zen]";
+                            if ((sflags & Utility.SpecialFlags.Cleansed) != 0) text += " [Cleansed]";
+                            if ((sflags & Utility.SpecialFlags.CorruptedNexus) != 0) text += " [Corrupted]";
+                            if ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0) text += " [Abyss]";
+                            if ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0) text += " [Expedition]";
+                            foreach (var mechanicName in mechanicNames)
+                            {
+                                if (IsMechanicHighlightEnabled(mechanicName))
+                                    text += " [" + mechanicName + "]";
+                            }
+                            if (towerWanted && !string.IsNullOrWhiteSpace(highlightedTowerName)) text += " [" + highlightedTowerName + "]";
+                            if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
+                            if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
                         }
-                        if (towerWanted && !string.IsNullOrWhiteSpace(highlightedTowerName)) text += " [" + highlightedTowerName + "]";
-                        if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
-                        if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
+
+                        var size = MeasureTextCached(text);
+                        var offsetY = labelContainsMapName ? Settings.MapNameOffsetY.Value : Settings.LabelOffset.Value;
+                        var pos = new Vector2(center.X - size.X / 2f, center.Y - (radius + offsetY));
+
+                    
+                        var textColor = Settings.LabelUseBiomeColor.Value ? ringColor : Settings.LabelTextColor.Value;
+
+                    
+                        if (labelContainsMapName && !(info.Visited || info.Unlocked))
+                        {
+                            textColor = System.Drawing.Color.FromArgb(
+                                textColor.A,
+                                (int)(textColor.R * 0.55f),
+                                (int)(textColor.G * 0.55f),
+                                (int)(textColor.B * 0.55f));
+                        }
+
+                    
+                    
+                    
+                        DrawTextWithLabelSettings(text, pos, textColor);
                     }
 
-                    var size = MeasureTextCached(text);
-                    var offsetY = labelContainsMapName ? Settings.MapNameOffsetY.Value : Settings.LabelOffset.Value;
-                    var pos = new Vector2(center.X - size.X / 2f, center.Y - (radius + offsetY));
-
-                    
-                    var textColor = Settings.LabelUseBiomeColor.Value ? ringColor : Settings.LabelTextColor.Value;
-
-                    
-                    if (labelContainsMapName && !(info.Visited || info.Unlocked))
-                    {
-                        textColor = System.Drawing.Color.FromArgb(
-                            textColor.A,
-                            (int)(textColor.R * 0.55f),
-                            (int)(textColor.G * 0.55f),
-                            (int)(textColor.B * 0.55f));
-                    }
-
-                    
-                    
-                    
-                    DrawTextWithLabelSettings(text, pos, textColor);
                     if (profileRenderSections)
                         renderNodeLabelsTicks += Stopwatch.GetTimestamp() - __labelsStart;
                 }
@@ -393,6 +443,14 @@ namespace AtlasBiomeHighlighter
                 if (profileRenderSections)
                     renderNodeTotalTicks += Stopwatch.GetTimestamp() - __nodeStart;
             }
+            }
+
+            if (Settings.ShowLabels.Value && Settings.ModernLabelCards.Value)
+            {
+                long __modernLabelsStart = profileRenderSections ? Stopwatch.GetTimestamp() : 0;
+                RenderQueuedModernNodeLabels(modernLabelDrawList);
+                if (profileRenderSections)
+                    renderNodeLabelsTicks += Stopwatch.GetTimestamp() - __modernLabelsStart;
             }
 
             if (profileRenderSections)
@@ -457,7 +515,7 @@ namespace AtlasBiomeHighlighter
             var lockedColor = Settings.ConnectionColorLocked.Value;
 
             var displaySize = ImGui.GetIO().DisplaySize;
-            var drawList = ImGui.GetForegroundDrawList();
+            var drawList = ImGui.GetBackgroundDrawList();
             uint unlockedPackedColor = GetCachedImGuiColor(unlockedColor);
             uint lockedPackedColor = GetCachedImGuiColor(lockedColor);
 
@@ -705,7 +763,7 @@ namespace AtlasBiomeHighlighter
         {
             
             
-            var dl = ImGui.GetForegroundDrawList();
+            var dl = ImGui.GetBackgroundDrawList();
             var col = ToImGuiColor(color);
             dl.AddTriangleFilled(p1, p2, p3, col);
         }
@@ -739,7 +797,7 @@ namespace AtlasBiomeHighlighter
             if (segments < 5)
                 segments = 5;
 
-            var dl = ImGui.GetForegroundDrawList();
+            var dl = ImGui.GetBackgroundDrawList();
             dl.AddCircle(center, radius, GetCachedImGuiColor(color), segments, thickness);
         }
 

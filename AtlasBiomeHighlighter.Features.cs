@@ -189,6 +189,7 @@ namespace AtlasBiomeHighlighter
             RegisterHotkey(Settings.ToggleShortestPathHotkey);
             RegisterHotkey(Settings.ShowTowerRangeHotkey);
             RegisterHotkey(Settings.PreferredGuideLinesToggleHotkey);
+            RegisterHotkey(Settings.ToggleIslandRumourTablesHotkey);
         }
 
         
@@ -480,6 +481,9 @@ namespace AtlasBiomeHighlighter
 
             if (IsKeyPressedOnce(Settings.PreferredGuideLinesToggleHotkey.Value))
                 Settings.PreferredGuideLines.Value = !Settings.PreferredGuideLines.Value;
+
+            if (IsKeyPressedOnce(Settings.ToggleIslandRumourTablesHotkey.Value))
+                Settings.ShowIslandRumourLabels.Value = !Settings.ShowIslandRumourLabels.Value;
 
             if (IsKeyPressedOnce(Settings.ShowTowerRangeHotkey.Value))
             {

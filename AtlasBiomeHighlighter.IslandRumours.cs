@@ -2040,7 +2040,7 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
             if (_islandRumourRenderCandidates.Count == 0)
                 return;
 
-            var drawList = ImGui.GetForegroundDrawList();
+            var drawList = ImGui.GetBackgroundDrawList();
             for (int i = 0; i < _islandRumourRenderCandidates.Count; i++)
             {
                 var candidate = _islandRumourRenderCandidates[i];
@@ -2234,6 +2234,16 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
                 var rumourBaseColor = GetIslandRumourColor(rowLayout.Row.Rumour);
                 var rumourColor = Utility.WithOpacity(rumourBaseColor, globalOpacity);
                 float textY = rowTop + (layout.RowHeight - layout.ValueLineHeight) / 2f;
+
+                if (Settings.IslandRumourRowAccents.Value)
+                {
+                    var rowAccent = WithIslandRumourAlpha(rumourBaseColor, globalOpacity * 0.92f);
+                    drawList.AddRectFilled(
+                        SnapTextPos(new Vector2(panelMin.X + 1f, rowTop + 3f)),
+                        SnapTextPos(new Vector2(panelMin.X + 4f, rowBottom - 3f)),
+                        GetCachedImGuiColor(rowAccent),
+                        1.5f);
+                }
 
                 DrawIslandRumourTableText(drawList, font, layout.FontSize, new Vector2(columnLefts[0] + IslandRumourCellPaddingX, textY), rumourColor, rowLayout.Rumour, globalOpacity, strongShadow: true);
                 DrawIslandRumourTableText(drawList, font, layout.FontSize, new Vector2(columnLefts[1] + IslandRumourCellPaddingX, textY), modsColor, rowLayout.Mods, globalOpacity, strongShadow: true);

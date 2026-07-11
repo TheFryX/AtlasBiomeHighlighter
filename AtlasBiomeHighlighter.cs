@@ -369,12 +369,98 @@ namespace AtlasBiomeHighlighter
 
         private void NormalizePreferredMapCatalogForCurrentAtlas()
         {
+            NormalizeModernLabelSettings();
             NormalizeIslandRumourSettings();
             NormalizePreferredMapDictionary();
             NormalizePreferredMapGroups();
             NormalizeFavoriteWaypointMaps();
             NormalizeTowerHighlightDictionaries();
             _preferredCacheHash = 0;
+        }
+
+        private void NormalizeModernLabelSettings()
+        {
+            Settings.ModernLabelCards ??= new ToggleNode(true);
+            Settings.ModernLabelScale ??= new RangeNode<float>(1.00f, 0.80f, 1.45f);
+            Settings.ModernLabelBackgroundOpacity ??= new RangeNode<float>(0.88f, 0.20f, 1.0f);
+            Settings.ModernLabelMaxWidth ??= new RangeNode<int>(360, 130, 420);
+            Settings.ModernLabelPreloadViewportScale ??= new RangeNode<float>(1.5f, 1.0f, 3.0f);
+            Settings.ModernLabelConnector ??= new ToggleNode(true);
+            Settings.ModernLabelAutoCompact ??= new ToggleNode(true);
+            Settings.ModernLabelCompactScaleThreshold ??= new RangeNode<float>(0.72f, 0.40f, 1.10f);
+            Settings.ModernLabelHideOrdinaryWhenZoomedOut ??= new ToggleNode(true);
+            Settings.ModernLabelShowBiomeText ??= new ToggleNode(false);
+            Settings.ModernLabelReadableBiomeBadge ??= new ToggleNode(true);
+            Settings.ModernLabelUseBiomeTitleColor ??= new ToggleNode(true);
+            Settings.ModernLabelDeclutter ??= new ToggleNode(true);
+            Settings.ModernLabelSpacing ??= new RangeNode<int>(0, 0, 16);
+            Settings.ModernLabelBackgroundColor ??= new ColorNode(System.Drawing.Color.FromArgb(15, 19, 25));
+            Settings.ModernLabelBorderColor ??= new ColorNode(System.Drawing.Color.FromArgb(164, 175, 194));
+            Settings.ModernLabelSmoothReveal ??= new ToggleNode(true);
+            Settings.ModernLabelPrioritySignalColors ??= new ToggleNode(true);
+            Settings.ModernLabelAdaptiveTextContrast ??= new ToggleNode(true);
+            Settings.PreferredGuideTargetPulse ??= new ToggleNode(true);
+            Settings.DebugSignalPositions ??= new ToggleNode(false);
+            Settings.PerformanceProfiling ??= new ToggleNode(false);
+            if (Settings.DiagnosticsSettingsVersion < 1)
+            {
+                // Position diagnostics and the spike profiler are intentionally opt-in.
+                // Older diagnostic packages enabled position sampling by default, which
+                // sorted every visible label each frame and could itself cause pan jitter.
+                Settings.DebugSignalPositions.Value = false;
+                Settings.PerformanceProfiling.Value = false;
+                Settings.DiagnosticsSettingsVersion = 1;
+            }
+            Settings.LabelOffset ??= new RangeNode<int>(20, -60, 60);
+            Settings.LabelUseBiomeColor ??= new ToggleNode(true);
+            Settings.LabelTextColor ??= new ColorNode(System.Drawing.Color.White);
+            Settings.LabelOutline ??= new ToggleNode(true);
+            Settings.LabelOutlineThickness ??= new RangeNode<int>(2, 1, 6);
+            Settings.LabelBold ??= new ToggleNode(true);
+            Settings.ShowSpecialTag ??= new ToggleNode(true);
+            Settings.ShowUniqueNameOnLabel ??= new ToggleNode(true);
+            Settings.PreferMapNameForDeadly ??= new ToggleNode(true);
+
+            if (Settings.ModernLabelSettingsVersion < 2)
+            {
+                // Apply the v2 screenshot preset once, then preserve user tuning.
+                Settings.ModernLabelCards.Value = true;
+                Settings.ModernLabelScale.Value = 1.00f;
+                Settings.ModernLabelBackgroundOpacity.Value = 0.88f;
+                Settings.ModernLabelMaxWidth.Value = 360;
+                Settings.ModernLabelPreloadViewportScale.Value = 1.5f;
+                Settings.ModernLabelReadableBiomeBadge.Value = true;
+                Settings.ModernLabelUseBiomeTitleColor.Value = true;
+                Settings.ModernLabelDeclutter.Value = true;
+                Settings.ModernLabelSpacing.Value = 0;
+                Settings.ModernLabelConnector.Value = true;
+                Settings.ModernLabelAutoCompact.Value = true;
+                Settings.ModernLabelCompactScaleThreshold.Value = 0.72f;
+                Settings.ModernLabelHideOrdinaryWhenZoomedOut.Value = true;
+                Settings.ModernLabelShowBiomeText.Value = false;
+                Settings.ModernLabelBackgroundColor.Value = System.Drawing.Color.FromArgb(15, 19, 25);
+                Settings.ModernLabelBorderColor.Value = System.Drawing.Color.FromArgb(164, 175, 194);
+
+                Settings.LabelOffset.Value = 20;
+                Settings.LabelUseBiomeColor.Value = true;
+                Settings.LabelTextColor.Value = System.Drawing.Color.White;
+                Settings.LabelOutline.Value = true;
+                Settings.LabelOutlineThickness.Value = 2;
+                Settings.LabelBold.Value = true;
+                Settings.ShowSpecialTag.Value = true;
+                Settings.ShowUniqueNameOnLabel.Value = true;
+                Settings.PreferMapNameForDeadly.Value = true;
+                Settings.ModernLabelSettingsVersion = 2;
+            }
+
+            if (Settings.ModernLabelSettingsVersion < 3)
+            {
+                Settings.ModernLabelSmoothReveal.Value = true;
+                Settings.ModernLabelPrioritySignalColors.Value = true;
+                Settings.ModernLabelAdaptiveTextContrast.Value = true;
+                Settings.PreferredGuideTargetPulse.Value = true;
+                Settings.ModernLabelSettingsVersion = 3;
+            }
         }
 
         private void NormalizeIslandRumourSettings()
@@ -384,6 +470,8 @@ namespace AtlasBiomeHighlighter
 
             if (Settings.IslandRumourRegionStatsColor == null)
                 Settings.IslandRumourRegionStatsColor = new ColorNode(System.Drawing.Color.FromArgb(120, 220, 255));
+
+            Settings.IslandRumourRowAccents ??= new ToggleNode(true);
 
             if (Settings.IslandRumourLabelFontSize == null)
                 Settings.IslandRumourLabelFontSize = new RangeNode<int>(16, 13, 22);
@@ -823,9 +911,11 @@ namespace AtlasBiomeHighlighter
 
             
             
-            int effectiveScreenRefreshMs = Settings.ShowLabels.Value
-                ? Math.Min(Settings.ScreenRefreshMs.Value, 250)
-                : Settings.ScreenRefreshMs.Value;
+            int effectiveScreenRefreshMs = IsLowLatencyVisibleCacheEnabled()
+                ? Math.Min(Settings.ScreenRefreshMs.Value, 50)
+                : Settings.ShowLabels.Value
+                    ? Math.Min(Settings.ScreenRefreshMs.Value, 250)
+                    : Settings.ScreenRefreshMs.Value;
 
             if (_visibleCacheBuildInProgress || _screenRefreshSw.ElapsedMilliseconds > effectiveScreenRefreshMs)
             {

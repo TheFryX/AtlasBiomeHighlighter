@@ -735,7 +735,24 @@ namespace AtlasBiomeHighlighter
             if (Vector2.DistanceSquared(from, toOnScreen) > 4f)
                 Graphics.DrawLine(from, toOnScreen, thickness, color);
             DrawArrow(toOnScreen - dir, toOnScreen, thickness, color, arrowSize);
+            if (Settings.PreferredGuideTargetPulse.Value)
+                DrawPreferredGuideTargetPulse(pos, color);
             return true;
+        }
+
+        private void DrawPreferredGuideTargetPulse(Vector2 center, System.Drawing.Color color)
+        {
+            const double cycleMs = 1_400d;
+            double phase = (Environment.TickCount64 % (long)cycleMs) / cycleMs * Math.PI * 2d;
+            float pulse = 0.5f + 0.5f * (float)Math.Sin(phase);
+            float baseRadius = Math.Max(18f, Settings.NodeRadius.Value + 6f);
+            float innerRadius = baseRadius + pulse * 2.5f;
+            float outerRadius = innerRadius + 4f;
+
+            var innerColor = Utility.WithOpacity(color, 0.28f + pulse * 0.22f);
+            var outerColor = Utility.WithOpacity(color, 0.10f + pulse * 0.10f);
+            DrawCircleFast(center, innerRadius, innerColor, 1.6f, 16);
+            DrawCircleFast(center, outerRadius, outerColor, 1f, 16);
         }
 
         private bool TryGetNodeScreenCenter(AtlasNodeDescription node, out Vector2 center)

@@ -80,8 +80,12 @@ namespace AtlasBiomeHighlighter
         public ToggleNode DebugPreferredMaps { get; set; } = new(false);
         public ToggleNode DebugPreferredDetails { get; set; } = new(false);
         public ToggleNode DebugNavigationTargets { get; set; } = new(false);
+        public ToggleNode DebugSignalPositions { get; set; } = new(false);
         public ToggleNode PerformanceProfiling { get; set; } = new(false);
         public RangeNode<int> PerformanceSpikeThresholdMs { get; set; } = new(4, 1, 50);
+        public int DiagnosticsSettingsVersion { get; set; }
+
+        public int ModernLabelSettingsVersion { get; set; }
 
         
         
@@ -116,7 +120,8 @@ namespace AtlasBiomeHighlighter
 
         public ToggleNode IslandRumoursEnabled { get; set; } = new(true);
         public ToggleNode ShowIslandRumourLabels { get; set; } = new(true);
-        public ToggleNode IslandRumourLiveTooltipScanEnabled { get; set; } = new(true);
+        public HotkeyNode ToggleIslandRumourTablesHotkey { get; set; } = new(Keys.F7);
+        public ToggleNode IslandRumourLiveTooltipScanEnabled { get; set; } = new(false);
         public RangeNode<int> IslandRumourRefreshMs { get; set; } = new(500, 250, 15000);
         public RangeNode<int> IslandRumourMaxLabels { get; set; } = new(3, 1, 3);
         public RangeNode<int> IslandRumourLabelOffsetY { get; set; } = new(44, 10, 160);
@@ -128,6 +133,7 @@ namespace AtlasBiomeHighlighter
         public ToggleNode IslandRumourUseIndividualColors { get; set; } = new(true);
         public ToggleNode ShowIslandRumourRegionStats { get; set; } = new(true);
         public ColorNode IslandRumourRegionStatsColor { get; set; } = new(Color.FromArgb(120, 220, 255));
+        public ToggleNode IslandRumourRowAccents { get; set; } = new(true);
         public Dictionary<string, ColorNode> IslandRumourColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public int IslandRumourSettingsVersion { get; set; }
 
@@ -221,6 +227,7 @@ namespace AtlasBiomeHighlighter
         public RangeNode<int> PreferredArrowSize { get; set; } = new(12, 6, 28);
         public RangeNode<int> PreferredGuideLimit { get; set; } = new(40, 5, 200);
         public HotkeyNode PreferredGuideLinesToggleHotkey { get; set; } = new(Keys.Home);
+        public ToggleNode PreferredGuideTargetPulse { get; set; } = new(true);
     
         
         
@@ -405,6 +412,28 @@ namespace AtlasBiomeHighlighter
         public ToggleNode LabelOutline { get; set; } = new(true);
         public RangeNode<int> LabelOutlineThickness { get; set; } = new(2, 1, 6);
         public ToggleNode LabelBold { get; set; } = new(true);
+
+        // Modern label cards are a presentation-only layer. The underlying map detection,
+        // status detection and biome logic remain unchanged and Classic can be restored at any time.
+        public ToggleNode ModernLabelCards { get; set; } = new(true);
+        public RangeNode<float> ModernLabelScale { get; set; } = new(1.00f, 0.80f, 1.45f);
+        public RangeNode<float> ModernLabelBackgroundOpacity { get; set; } = new(0.88f, 0.20f, 1.0f);
+        public RangeNode<int> ModernLabelMaxWidth { get; set; } = new(360, 130, 420);
+        public RangeNode<float> ModernLabelPreloadViewportScale { get; set; } = new(1.5f, 1.0f, 3.0f);
+        public ToggleNode ModernLabelConnector { get; set; } = new(true);
+        public ToggleNode ModernLabelAutoCompact { get; set; } = new(true);
+        public RangeNode<float> ModernLabelCompactScaleThreshold { get; set; } = new(0.72f, 0.40f, 1.10f);
+        public ToggleNode ModernLabelHideOrdinaryWhenZoomedOut { get; set; } = new(true);
+        public ToggleNode ModernLabelShowBiomeText { get; set; } = new(false);
+        public ToggleNode ModernLabelReadableBiomeBadge { get; set; } = new(true);
+        public ToggleNode ModernLabelUseBiomeTitleColor { get; set; } = new(true);
+        public ToggleNode ModernLabelDeclutter { get; set; } = new(true);
+        public RangeNode<int> ModernLabelSpacing { get; set; } = new(0, 0, 16);
+        public ColorNode ModernLabelBackgroundColor { get; set; } = new(Color.FromArgb(15, 19, 25));
+        public ColorNode ModernLabelBorderColor { get; set; } = new(Color.FromArgb(164, 175, 194));
+        public ToggleNode ModernLabelSmoothReveal { get; set; } = new(true);
+        public ToggleNode ModernLabelPrioritySignalColors { get; set; } = new(true);
+        public ToggleNode ModernLabelAdaptiveTextContrast { get; set; } = new(true);
 
         
         
