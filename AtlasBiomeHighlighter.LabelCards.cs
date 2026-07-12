@@ -128,7 +128,9 @@ namespace AtlasBiomeHighlighter
             string? highlightedTowerName)
         {
             var sflags = info.SpecialFlags;
+            bool delirium = Settings.ShowDeliriumStatus.Value && info.HasDelirium;
             bool special =
+                delirium ||
                 mechanicWanted ||
                 towerWanted ||
                 (sflags & (Utility.SpecialFlags.UniqueMap |
@@ -142,6 +144,7 @@ namespace AtlasBiomeHighlighter
             bool important = preferredWanted || special || (info.Unlocked && !info.Completed);
             int priority = 0;
             if (preferredWanted) priority += 1000;
+            if (delirium) priority += 850;
             if (special) priority += 700;
             if (info.Unlocked && !info.Completed) priority += 420;
             if (info.Attempted) priority += 260;
@@ -249,6 +252,16 @@ namespace AtlasBiomeHighlighter
             float detailFontSize = MathF.Round(Math.Clamp(titleFontSize * 0.92f, 13f, 19f));
             int titleSizeKey = Math.Max(1, (int)titleFontSize);
             int detailSizeKey = Math.Max(1, (int)detailFontSize);
+            bool showDelirium = Settings.ShowDeliriumStatus.Value && info.HasDelirium;
+            string deliriumText = showDelirium
+                ? info.DeliriumPercent > 0 ? $"DELI {info.DeliriumPercent}%" : "DELI"
+                : string.Empty;
+            float deliriumPaddingX = showDelirium ? 6f : 0f;
+            float deliriumGap = showDelirium ? 7f : 0f;
+            Vector2 deliriumTextSize = showDelirium
+                ? MeasureModernLabelText(font, detailSizeKey, deliriumText)
+                : Vector2.Zero;
+            float deliriumLayoutWidth = deliriumTextSize.X + deliriumPaddingX * 2f;
 
             float maxPanelWidth = Math.Max(140f, Settings.ModernLabelMaxWidth.Value);
             bool showStatusGlyph = Settings.ShowMapStatus.Value;
@@ -274,13 +287,16 @@ namespace AtlasBiomeHighlighter
             float detailLayoutWidth = detailWidth + detailPaddingX * 2f;
             float maxTitleWidth = Math.Max(
                 54f,
-                maxPanelWidth - leadingSpace - paddingRight - detailGap - detailLayoutWidth);
+                maxPanelWidth - leadingSpace - paddingRight -
+                deliriumLayoutWidth - deliriumGap - detailGap - detailLayoutWidth);
 
             title = FitModernLabelText(font, title, titleSizeKey, maxTitleWidth);
             Vector2 titleSize = MeasureModernLabelText(font, titleSizeKey, title);
             float titleLineHeight = Math.Max(titleFontSize, MeasureModernLabelText(font, titleSizeKey, "Ag").Y);
             float panelHeight = MathF.Ceiling(titleLineHeight + paddingY * 2f);
             float contentWidth = leadingSpace + titleSize.X + paddingRight;
+            if (showDelirium)
+                contentWidth += deliriumLayoutWidth + deliriumGap;
             if (!string.IsNullOrEmpty(detail))
                 contentWidth += detailGap + detailLayoutWidth;
             float panelWidth = Math.Clamp(MathF.Ceiling(contentWidth), 76f, maxPanelWidth);
@@ -376,6 +392,58 @@ namespace AtlasBiomeHighlighter
                 DrawAtlasSignalStatusGlyph(drawList, glyphCenter, info, statusColor);
             }
 
+            if (showDelirium)
+            {
+                Color rawDeliriumAccent = Settings.DeliriumStatusColor.Value;
+                Color deliriumAccent = Settings.ModernLabelAdaptiveTextContrast.Value
+                    ? MakeModernLabelAccentReadable(rawDeliriumAccent)
+                    : rawDeliriumAccent;
+                Vector2 deliriumChipMin = SnapTextPos(new Vector2(
+                    panelMin.X + leadingSpace,
+                    panelMin.Y + 2f));
+                Vector2 deliriumChipMax = SnapTextPos(new Vector2(
+                    deliriumChipMin.X + deliriumLayoutWidth,
+                    panelMax.Y - 2f));
+                Vector2 deliriumTextPos = SnapTextPos(new Vector2(
+                    deliriumChipMin.X + deliriumPaddingX,
+                    panelMin.Y + (panelHeight - deliriumTextSize.Y) * 0.5f));
+                Color deliriumFill = Utility.WithOpacity(
+                    BlendModernLabelColor(Settings.ModernLabelBackgroundColor.Value, rawDeliriumAccent, 0.42f),
+                    Math.Max(globalOpacity, 0.90f));
+                Color deliriumBorder = Utility.WithOpacity(
+                    deliriumAccent,
+                    Math.Max(globalOpacity, 0.96f));
+                Color deliriumTextColor = Utility.WithOpacity(
+                    Color.FromArgb(252, 250, 255),
+                    textOpacity);
+
+                drawList.AddRectFilled(
+                    deliriumChipMin,
+                    deliriumChipMax,
+                    GetCachedImGuiColor(deliriumFill),
+                    3f);
+                drawList.AddRect(
+                    deliriumChipMin,
+                    deliriumChipMax,
+                    GetCachedImGuiColor(deliriumBorder),
+                    3f,
+                    0,
+                    1.4f);
+                drawList.AddRectFilled(
+                    deliriumChipMin + new Vector2(1f, 2f),
+                    new Vector2(deliriumChipMin.X + 3f, deliriumChipMax.Y - 2f),
+                    GetCachedImGuiColor(deliriumBorder),
+                    1f);
+                DrawModernLabelText(
+                    drawList,
+                    font,
+                    detailFontSize,
+                    deliriumTextPos,
+                    deliriumTextColor,
+                    deliriumText,
+                    adaptiveOutline: false);
+            }
+
             // The modern style must honour biome-coloured map names for every node,
             // including Preferred, Expedition, Deadly and other important targets.
             // Previously the Important branch forced those titles to neutral white,
@@ -404,7 +472,7 @@ namespace AtlasBiomeHighlighter
                 (candidate.Important || GetModernLabelLuminance(titleColor) < 0.62f);
 
             Vector2 titlePos = SnapTextPos(new Vector2(
-                panelMin.X + leadingSpace,
+                panelMin.X + leadingSpace + deliriumLayoutWidth + deliriumGap,
                 panelMin.Y + (panelHeight - titleSize.Y) * 0.5f));
             DrawModernLabelText(
                 drawList,
@@ -847,6 +915,8 @@ namespace AtlasBiomeHighlighter
             var flags = candidate.Info.SpecialFlags;
             if (candidate.PreferredWanted)
                 return Settings.PreferredMapRingColor.Value;
+            if (Settings.ShowDeliriumStatus.Value && candidate.Info.HasDelirium)
+                return Settings.DeliriumStatusColor.Value;
             if ((flags & Utility.SpecialFlags.DeadlyBoss) != 0)
                 return Settings.DeadlyBossRingColor.Value;
             if ((flags & Utility.SpecialFlags.AreaContainsExpedition) != 0)

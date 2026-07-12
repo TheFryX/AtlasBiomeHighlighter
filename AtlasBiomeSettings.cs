@@ -434,6 +434,8 @@ namespace AtlasBiomeHighlighter
         public ToggleNode ModernLabelSmoothReveal { get; set; } = new(true);
         public ToggleNode ModernLabelPrioritySignalColors { get; set; } = new(true);
         public ToggleNode ModernLabelAdaptiveTextContrast { get; set; } = new(true);
+        public ToggleNode ShowDeliriumStatus { get; set; } = new(true);
+        public ColorNode DeliriumStatusColor { get; set; } = new(Color.FromArgb(184, 112, 255));
 
         
         

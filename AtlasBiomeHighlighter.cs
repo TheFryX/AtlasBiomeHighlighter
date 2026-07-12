@@ -399,6 +399,8 @@ namespace AtlasBiomeHighlighter
             Settings.ModernLabelSmoothReveal ??= new ToggleNode(true);
             Settings.ModernLabelPrioritySignalColors ??= new ToggleNode(true);
             Settings.ModernLabelAdaptiveTextContrast ??= new ToggleNode(true);
+            Settings.ShowDeliriumStatus ??= new ToggleNode(true);
+            Settings.DeliriumStatusColor ??= new ColorNode(System.Drawing.Color.FromArgb(184, 112, 255));
             Settings.PreferredGuideTargetPulse ??= new ToggleNode(true);
             Settings.DebugSignalPositions ??= new ToggleNode(false);
             Settings.PerformanceProfiling ??= new ToggleNode(false);
@@ -675,6 +677,7 @@ namespace AtlasBiomeHighlighter
         {
             _atlasNodes = Array.Empty<AtlasNodeDescription>();
             _visibleNodes.Clear();
+            _deliriumStatusByCoordinate.Clear();
             ClearIslandRumourCache();
             ResetPreferredGuideDiscovery();
             ResetNavigationTargetAnchors();

@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Reflection;
 using System.Linq;
+using ExileCore2.PoEMemory.Components;
 using ExileCore2.PoEMemory.Elements.AtlasElements;
+using ExileCore2.Shared.Enums;
 using Vector2 = System.Numerics.Vector2;
 
 namespace AtlasBiomeHighlighter
@@ -871,6 +873,176 @@ namespace AtlasBiomeHighlighter
             catch { }
 
             return result;
+        }
+
+        public static bool TryGetDeliriumStatus(AtlasNodeDescription nd, out int percent)
+        {
+            percent = 0;
+
+            try
+            {
+                var root = nd?.Element;
+                if (root == null)
+                    return false;
+
+                bool detected = false;
+                var identities = root.ContentIdentity;
+                if (identities != null)
+                {
+                    for (int i = 0; i < identities.Count; i++)
+                    {
+                        var identity = identities[i];
+                        if (identity == null)
+                            continue;
+
+                        if (IsDeliriumIdentity(identity.Id) ||
+                            IsDeliriumIdentity(identity.AtlasIcon) ||
+                            IsDeliriumIdentity(identity.PassiveArt))
+                        {
+                            detected = true;
+                            break;
+                        }
+                    }
+                }
+
+                var mapContent = root.AtlasEntry?.MapContent;
+                if (!detected && mapContent != null)
+                {
+                    detected = IsDeliriumIdentity(mapContent.Id) ||
+                               IsDeliriumIdentity(mapContent.Name) ||
+                               IsDeliriumIdentity(mapContent.Art);
+                }
+
+                if (!detected)
+                    return false;
+
+                if (TryReadDeliriumPercentFromEntity(root, out percent))
+                    return true;
+
+                TryReadDeliriumPercentFromMapContent(mapContent, out percent);
+                return true;
+            }
+            catch
+            {
+                percent = 0;
+                return false;
+            }
+        }
+
+        private static bool IsDeliriumIdentity(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            string normalized = NormalizeToken(value);
+            if (normalized.Length == 0 ||
+                normalized.Contains("simulacrum", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains("gigamirror", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return normalized.Equals("delirium", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("deliriumfog", StringComparison.OrdinalIgnoreCase) ||
+                   IdentifierTokenMatches(normalized, "atlasiconcontentdelirium") ||
+                   IdentifierTokenMatches(normalized, "deliriummirror") ||
+                   IdentifierTokenMatches(normalized, "deliriumencounter");
+        }
+
+        private static bool TryReadDeliriumPercentFromEntity(AtlasPanelNode root, out int percent)
+        {
+            percent = 0;
+
+            try
+            {
+                var statDictionary = root.Entity?.GetComponent<Stats>()?.StatDictionary;
+                if (statDictionary == null)
+                    return false;
+
+                if (statDictionary.TryGetValue(GameStat.MapEndgameFogDepthVisualOnly, out int visualDepth) &&
+                    TryNormalizeDeliriumPercent(visualDepth, out percent))
+                {
+                    return true;
+                }
+
+                return statDictionary.TryGetValue(GameStat.MapEndgameFogDepth, out int depth) &&
+                       TryNormalizeDeliriumPercent(depth, out percent);
+            }
+            catch
+            {
+                percent = 0;
+                return false;
+            }
+        }
+
+        private static bool TryReadDeliriumPercentFromMapContent(
+            ExileCore2.PoEMemory.FilesInMemory.Atlas.EndgameMapContent? mapContent,
+            out int percent)
+        {
+            percent = 0;
+            if (mapContent == null)
+                return false;
+
+            try
+            {
+                var stats = mapContent.Stats;
+                var values = mapContent.StatValues;
+                if (stats == null || values == null)
+                    return false;
+
+                int fallback = 0;
+                int count = Math.Min(stats.Count, values.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    var stat = stats[i];
+                    if (stat == null)
+                        continue;
+
+                    string key = NormalizeToken(stat.Key);
+                    string matchingStat = NormalizeToken(stat.MatchingStat.ToString());
+                    bool visual = key.Contains("mapendgamefogdepthvisualonly", StringComparison.Ordinal) ||
+                                  matchingStat.Equals("mapendgamefogdepthvisualonly", StringComparison.Ordinal);
+                    bool regular = key.Contains("mapendgamefogdepth", StringComparison.Ordinal) ||
+                                   matchingStat.Equals("mapendgamefogdepth", StringComparison.Ordinal);
+                    if (!visual && !regular)
+                        continue;
+
+                    if (!TryNormalizeDeliriumPercent(values[i], out int candidate))
+                        continue;
+
+                    if (visual)
+                    {
+                        percent = candidate;
+                        return true;
+                    }
+
+                    fallback = candidate;
+                }
+
+                percent = fallback;
+                return fallback > 0;
+            }
+            catch
+            {
+                percent = 0;
+                return false;
+            }
+        }
+
+        private static bool TryNormalizeDeliriumPercent(int rawValue, out int percent)
+        {
+            percent = 0;
+            if (rawValue <= 0)
+                return false;
+
+            // Fog depth is exposed as either its display percentage or a small depth tier,
+            // depending on the source record. Current endgame tiers map 1..10 to 100% steps.
+            int normalized = rawValue <= 10 ? rawValue * 100 : rawValue;
+            if (normalized <= 0 || normalized > 2_000)
+                return false;
+
+            percent = normalized;
+            return true;
         }
 
         public static SpecialFlags TryGetSpecialFlags(AtlasNodeDescription nd)

@@ -121,6 +121,9 @@ namespace AtlasBiomeHighlighter
                 { bool v = s.ModernLabelSmoothReveal.Value; if (ImGui.Checkbox("Smooth signal reveal", ref v)) s.ModernLabelSmoothReveal.Value = v; }
                 { bool v = s.ModernLabelPrioritySignalColors.Value; if (ImGui.Checkbox("Priority-colored signals", ref v)) s.ModernLabelPrioritySignalColors.Value = v; }
                 { bool v = s.ModernLabelAdaptiveTextContrast.Value; if (ImGui.Checkbox("Adaptive label contrast", ref v)) s.ModernLabelAdaptiveTextContrast.Value = v; }
+                { bool v = s.ShowDeliriumStatus.Value; if (ImGui.Checkbox("Always show Delirium status", ref v)) s.ShowDeliriumStatus.Value = v; }
+                if (s.ShowDeliriumStatus.Value)
+                    DrawColorEdit("Delirium status color", s.DeliriumStatusColor.Value, c => s.DeliriumStatusColor.Value = c, false);
                 { bool v = s.ModernLabelDeclutter.Value; if (ImGui.Checkbox("Avoid overlapping labels", ref v)) s.ModernLabelDeclutter.Value = v; }
                 if (s.ModernLabelDeclutter.Value)
                 {

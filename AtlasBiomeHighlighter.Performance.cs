@@ -26,6 +26,26 @@ namespace AtlasBiomeHighlighter
         private const int VisibleCacheLowLatencyMinItemsBeforeTimeSlice = 64;
         private const double VisibleCacheLowLatencyTimeBudgetMs = 4.0;
 
+        private readonly Dictionary<(int x, int y), DeliriumStatusCacheEntry> _deliriumStatusByCoordinate = new(1024);
+        private const int DeliriumStatusRefreshMs = 5_000;
+        private const int DeliriumStatusCacheMaxEntries = 8_192;
+
+        private readonly struct DeliriumStatusCacheEntry
+        {
+            public DeliriumStatusCacheEntry(long elementAddress, bool hasDelirium, int percent, long refreshedAtMs)
+            {
+                ElementAddress = elementAddress;
+                HasDelirium = hasDelirium;
+                Percent = percent;
+                RefreshedAtMs = refreshedAtMs;
+            }
+
+            public long ElementAddress { get; }
+            public bool HasDelirium { get; }
+            public int Percent { get; }
+            public long RefreshedAtMs { get; }
+        }
+
         
         private Dictionary<(int x, int y), NodeStatus> _statusByCoord = new(1024);
 
@@ -91,7 +111,9 @@ namespace AtlasBiomeHighlighter
                 string nameToken,
                 string idToken,
                 string[] mechanicNames,
-                string[] mechanicTokens)
+                string[] mechanicTokens,
+                bool hasDelirium,
+                int deliriumPercent)
             {
                 Node = node;
                 Biome = biome;
@@ -108,6 +130,8 @@ namespace AtlasBiomeHighlighter
                 IdToken = idToken;
                 MechanicNames = mechanicNames ?? Array.Empty<string>();
                 MechanicTokens = mechanicTokens ?? Array.Empty<string>();
+                HasDelirium = hasDelirium;
+                DeliriumPercent = deliriumPercent;
             }
 
             public AtlasNodeDescription Node { get; }
@@ -125,6 +149,8 @@ namespace AtlasBiomeHighlighter
             public string IdToken { get; }
             public string[] MechanicNames { get; }
             public string[] MechanicTokens { get; }
+            public bool HasDelirium { get; }
+            public int DeliriumPercent { get; }
         }
 
         
@@ -219,6 +245,11 @@ namespace AtlasBiomeHighlighter
 
                     string[] mechanicArray = Array.Empty<string>();
                     string[] mechanicTokenArray = Array.Empty<string>();
+                    bool hasDelirium = false;
+                    int deliriumPercent = 0;
+                    if (Settings.ModernLabelCards.Value && Settings.ShowDeliriumStatus.Value)
+                        hasDelirium = TryGetCachedDeliriumStatus(nd, out deliriumPercent);
+
                     if (needMechanicInfo)
                     {
                         var mechanicNames = Utility.TryGetMechanicNames(nd);
@@ -245,7 +276,9 @@ namespace AtlasBiomeHighlighter
                         nameToken,
                         idToken,
                         mechanicArray,
-                        mechanicTokenArray));
+                        mechanicTokenArray,
+                        hasDelirium,
+                        deliriumPercent));
                 }
 
                 if (processed >= minItemsBeforeTimeSlice && (processed & timeSliceMask) == 0)
@@ -263,6 +296,49 @@ namespace AtlasBiomeHighlighter
             PublishVisibleCaches();
             ResetVisibleCacheBuild();
             return true;
+        }
+
+        private bool TryGetCachedDeliriumStatus(AtlasNodeDescription node, out int percent)
+        {
+            percent = 0;
+            var element = node?.Element;
+            if (element == null)
+                return false;
+
+            try
+            {
+                var coordinate = node.Coordinate;
+                var key = (coordinate.X, coordinate.Y);
+                long address = element.Address;
+                long now = Environment.TickCount64;
+
+                if (_deliriumStatusByCoordinate.TryGetValue(key, out var cached) &&
+                    cached.ElementAddress == address &&
+                    now - cached.RefreshedAtMs < DeliriumStatusRefreshMs)
+                {
+                    percent = cached.Percent;
+                    return cached.HasDelirium;
+                }
+
+                bool hasDelirium = Utility.TryGetDeliriumStatus(node, out percent);
+                if (_deliriumStatusByCoordinate.Count >= DeliriumStatusCacheMaxEntries &&
+                    !_deliriumStatusByCoordinate.ContainsKey(key))
+                {
+                    _deliriumStatusByCoordinate.Clear();
+                }
+
+                _deliriumStatusByCoordinate[key] = new DeliriumStatusCacheEntry(
+                    address,
+                    hasDelirium,
+                    percent,
+                    now);
+                return hasDelirium;
+            }
+            catch
+            {
+                percent = 0;
+                return false;
+            }
         }
 
         private bool IsLowLatencyVisibleCacheEnabled()

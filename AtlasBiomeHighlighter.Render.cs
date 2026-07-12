@@ -141,7 +141,7 @@ namespace AtlasBiomeHighlighter
                 bool mechanicWanted = anyMechanicHighlightsEnabled && IsAnyMechanicHighlightEnabled(mechanicNames);
                 string? highlightedTowerName = null;
                 bool towerWanted = anyTowerHighlightsEnabled && TryGetHighlightedTowerName(info.Node, out highlightedTowerName);
-                bool specialWanted =
+                bool standardSpecialWanted =
                     mechanicWanted ||
                     towerWanted ||
                     ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && Settings.HighlightUniqueMaps.Value) ||
@@ -151,6 +151,10 @@ namespace AtlasBiomeHighlighter
                     ((sflags & Utility.SpecialFlags.Cleansed) != 0 && Settings.HighlightCleansed.Value) ||
                     ((sflags & Utility.SpecialFlags.AreaContainsAbyss) != 0 && Settings.HighlightAreaContainsAbyss.Value) ||
                     ((sflags & Utility.SpecialFlags.AreaContainsExpedition) != 0 && Settings.HighlightAreaContainsExpedition.Value);
+                bool deliriumWanted = Settings.ModernLabelCards.Value &&
+                                      Settings.ShowDeliriumStatus.Value &&
+                                      info.HasDelirium;
+                bool specialWanted = standardSpecialWanted || deliriumWanted;
 
                 
                 bool preferredWanted = false;
@@ -249,7 +253,7 @@ namespace AtlasBiomeHighlighter
                     continue;
 
                 int extra = 0;
-                bool nonMechanicSpecialWanted = specialWanted && !mechanicWanted && !towerWanted;
+                bool nonMechanicSpecialWanted = standardSpecialWanted && !mechanicWanted && !towerWanted;
                 bool drawBaseRing = renderOverlay && (biomeVisible || preferredWanted || nonMechanicSpecialWanted);
 
                 
@@ -257,6 +261,14 @@ namespace AtlasBiomeHighlighter
                 
                 if (drawBaseRing)
                     DrawCircleFast(center, radius, ringColor, thickness, NodeCircleSegments);
+
+                if (renderOverlay && deliriumWanted)
+                {
+                    var c = Utility.WithOpacity(
+                        Settings.DeliriumStatusColor.Value,
+                        Settings.Opacity.Value * Settings.SpecialAlphaMultiplier.Value);
+                    DrawCircleFast(center, radius + (++extra) * 2, c, Settings.SpecialRingThickness.Value, NodeCircleSegments);
+                }
 
 
                 if (renderOverlay && preferredWanted)
@@ -412,6 +424,7 @@ namespace AtlasBiomeHighlighter
                             if ((sflags & Utility.SpecialFlags.UniqueMap) != 0 && !(Settings.ShowUniqueNameOnLabel.Value)) text += " [Unique]";
                             if (preferredWanted) text += " " + GetPreferredTag(preferredMatchedToken);
                         }
+
 
                         var size = MeasureTextCached(text);
                         var offsetY = labelContainsMapName ? Settings.MapNameOffsetY.Value : Settings.LabelOffset.Value;
