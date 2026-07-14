@@ -473,6 +473,10 @@ namespace AtlasBiomeHighlighter
             if (Settings.IslandRumourRegionStatsColor == null)
                 Settings.IslandRumourRegionStatsColor = new ColorNode(System.Drawing.Color.FromArgb(120, 220, 255));
 
+            Settings.FilterIslandRumourTablesByGrandExpedition ??= new ToggleNode(false);
+            Settings.IslandRumourMinimumGrandExpeditionCount ??= new RangeNode<int>(5, 1, 20);
+            Settings.IslandRumourGrandExpeditionFilterColor ??=
+                new ColorNode(System.Drawing.Color.FromArgb(255, 196, 64));
             Settings.IslandRumourRowAccents ??= new ToggleNode(true);
 
             if (Settings.IslandRumourLabelFontSize == null)

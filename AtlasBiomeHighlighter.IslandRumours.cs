@@ -1488,7 +1488,7 @@ namespace AtlasBiomeHighlighter
 
         private void ProcessIslandRumourRegionStats(long now, bool cameraMoving)
         {
-            if (!Settings.ShowIslandRumourRegionStats.Value || _islandRumourSnapshots.Count == 0)
+            if (!AreIslandRumourRegionStatsRequired() || _islandRumourSnapshots.Count == 0)
                 return;
 
             // A card that was rendered in the previous frame gets first priority. The list is
@@ -1590,7 +1590,7 @@ namespace AtlasBiomeHighlighter
             AtlasButtonNode button,
             long now)
         {
-            if (!Settings.ShowIslandRumourRegionStats.Value || snapshot.RegionStatsResolved)
+            if (!AreIslandRumourRegionStatsRequired() || snapshot.RegionStatsResolved)
                 return snapshot.RegionStatsResolved;
 
             if (TryApplyCachedIslandRumourRegionStats(snapshot))
@@ -1608,6 +1608,12 @@ namespace AtlasBiomeHighlighter
 
             CompleteIslandRumourRegionStats(snapshot, stats);
             return true;
+        }
+
+        private bool AreIslandRumourRegionStatsRequired()
+        {
+            return Settings.ShowIslandRumourRegionStats.Value ||
+                   Settings.FilterIslandRumourTablesByGrandExpedition.Value;
         }
 
         private void CompleteIslandRumourRegionStats(
@@ -2007,6 +2013,7 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
             {
                 var snapshot = _islandRumourSnapshots[i];
                 if (snapshot.TableRows.Length == 0 ||
+                    !PassesIslandRumourGrandExpeditionFilter(snapshot) ||
                     !TryGetIslandRumourButtonCenter(snapshot.Button, out var center))
                 {
                     continue;
@@ -2052,6 +2059,19 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
                     offsetY,
                     maxLabels);
             }
+        }
+
+        private bool PassesIslandRumourGrandExpeditionFilter(IslandRumourSnapshot snapshot)
+        {
+            if (!Settings.FilterIslandRumourTablesByGrandExpedition.Value)
+                return true;
+
+            int minimum = Math.Clamp(
+                Settings.IslandRumourMinimumGrandExpeditionCount.Value,
+                Settings.IslandRumourMinimumGrandExpeditionCount.Min,
+                Settings.IslandRumourMinimumGrandExpeditionCount.Max);
+            return snapshot.RegionStatsResolved &&
+                   snapshot.RegionGrandExpeditionCount >= minimum;
         }
 
         private int FindIslandRumourRenderCandidate(
@@ -2151,17 +2171,29 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
                 Settings.IslandRumourLabelBackgroundOpacity.Min,
                 Settings.IslandRumourLabelBackgroundOpacity.Max);
 
-            var accentColor = WithIslandRumourAlpha(Color.FromArgb(218, 171, 66), globalOpacity * 0.95f);
+            bool matchesGrandExpeditionFilter =
+                Settings.FilterIslandRumourTablesByGrandExpedition.Value &&
+                PassesIslandRumourGrandExpeditionFilter(snapshot);
+            var baseAccentColor = matchesGrandExpeditionFilter
+                ? Settings.IslandRumourGrandExpeditionFilterColor.Value
+                : Color.FromArgb(218, 171, 66);
+            var accentColor = WithIslandRumourAlpha(baseAccentColor, globalOpacity * 0.95f);
             var shadowColor = WithIslandRumourAlpha(Color.Black, globalOpacity * backgroundOpacity * 0.62f);
             var backgroundColor = WithIslandRumourAlpha(Color.FromArgb(15, 19, 25), globalOpacity * backgroundOpacity);
             var headerBackground = WithIslandRumourAlpha(Color.FromArgb(32, 39, 50), globalOpacity * Math.Min(1f, backgroundOpacity + 0.02f));
             var alternateRowBackground = WithIslandRumourAlpha(Color.FromArgb(255, 255, 255), globalOpacity * 0.035f);
-            var borderColor = WithIslandRumourAlpha(Color.FromArgb(164, 175, 194), globalOpacity * 0.66f);
+            var borderColor = matchesGrandExpeditionFilter
+                ? WithIslandRumourAlpha(baseAccentColor, globalOpacity * 0.76f)
+                : WithIslandRumourAlpha(Color.FromArgb(164, 175, 194), globalOpacity * 0.66f);
             var dividerColor = WithIslandRumourAlpha(Color.FromArgb(180, 192, 210), globalOpacity * 0.24f);
             var headerTextColor = WithIslandRumourAlpha(Color.FromArgb(220, 226, 236), globalOpacity * 0.92f);
             var modsColor = WithIslandRumourAlpha(Color.FromArgb(242, 219, 154), globalOpacity * 0.96f);
             var mapTypeColor = WithIslandRumourAlpha(Color.FromArgb(159, 220, 239), globalOpacity * 0.96f);
-            var statsColor = Utility.WithOpacity(Settings.IslandRumourRegionStatsColor.Value, globalOpacity);
+            var statsColor = Utility.WithOpacity(
+                matchesGrandExpeditionFilter
+                    ? baseAccentColor
+                    : Settings.IslandRumourRegionStatsColor.Value,
+                globalOpacity);
 
             const float rounding = 6f;
             drawList.AddRectFilled(
@@ -2176,7 +2208,7 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
             drawList.AddLine(
                 new Vector2(connectorX, connectorStartY),
                 new Vector2(center.X, connectorEndY),
-                GetCachedImGuiColor(WithIslandRumourAlpha(Color.FromArgb(218, 171, 66), globalOpacity * 0.62f)));
+                GetCachedImGuiColor(WithIslandRumourAlpha(baseAccentColor, globalOpacity * 0.62f)));
 
             drawList.AddRectFilled(panelMin, panelMax, GetCachedImGuiColor(backgroundColor), rounding);
             drawList.AddRect(panelMin, panelMax, GetCachedImGuiColor(borderColor), rounding);
@@ -2305,7 +2337,7 @@ private static bool TryReadIntPair(object? value, out (int x, int y) result)
             drawList.AddLine(
                 SnapTextPos(new Vector2(contentLeft, footerTop)),
                 SnapTextPos(new Vector2(contentRight, footerTop)),
-                GetCachedImGuiColor(WithIslandRumourAlpha(Color.FromArgb(218, 171, 66), globalOpacity * 0.48f)));
+                GetCachedImGuiColor(WithIslandRumourAlpha(baseAccentColor, globalOpacity * 0.48f)));
 
             DrawIslandRumourTableText(
                 drawList,

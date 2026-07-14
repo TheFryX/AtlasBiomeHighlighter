@@ -133,6 +133,9 @@ namespace AtlasBiomeHighlighter
         public ToggleNode IslandRumourUseIndividualColors { get; set; } = new(true);
         public ToggleNode ShowIslandRumourRegionStats { get; set; } = new(true);
         public ColorNode IslandRumourRegionStatsColor { get; set; } = new(Color.FromArgb(120, 220, 255));
+        public ToggleNode FilterIslandRumourTablesByGrandExpedition { get; set; } = new(false);
+        public RangeNode<int> IslandRumourMinimumGrandExpeditionCount { get; set; } = new(5, 1, 20);
+        public ColorNode IslandRumourGrandExpeditionFilterColor { get; set; } = new(Color.FromArgb(255, 196, 64));
         public ToggleNode IslandRumourRowAccents { get; set; } = new(true);
         public Dictionary<string, ColorNode> IslandRumourColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public int IslandRumourSettingsVersion { get; set; }

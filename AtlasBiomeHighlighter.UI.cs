@@ -247,6 +247,30 @@ namespace AtlasBiomeHighlighter
             DrawColorEdit("Rumour text", s.IslandRumourTextColor.Value, c => s.IslandRumourTextColor.Value = c, false);
             { bool v = s.IslandRumourUseIndividualColors.Value; if (ImGui.Checkbox("Use per-rumour colors", ref v)) s.IslandRumourUseIndividualColors.Value = v; }
             { bool v = s.ShowIslandRumourRegionStats.Value; if (ImGui.Checkbox("Show region map / Grand Expedition counts", ref v)) s.ShowIslandRumourRegionStats.Value = v; }
+            {
+                bool v = s.FilterIslandRumourTablesByGrandExpedition.Value;
+                if (ImGui.Checkbox("Show only tables with enough Grand Expedition maps", ref v))
+                    s.FilterIslandRumourTablesByGrandExpedition.Value = v;
+            }
+            if (s.FilterIslandRumourTablesByGrandExpedition.Value)
+            {
+                int v = s.IslandRumourMinimumGrandExpeditionCount.Value;
+                if (ImGui.SliderInt(
+                        "Minimum Grand Expedition maps",
+                        ref v,
+                        s.IslandRumourMinimumGrandExpeditionCount.Min,
+                        s.IslandRumourMinimumGrandExpeditionCount.Max))
+                {
+                    s.IslandRumourMinimumGrandExpeditionCount.Value = v;
+                }
+
+                DrawColorEdit(
+                    "Matching table accent",
+                    s.IslandRumourGrandExpeditionFilterColor.Value,
+                    c => s.IslandRumourGrandExpeditionFilterColor.Value = c,
+                    false);
+                ImGui.TextDisabled($"Only Rumours tables with GE >= {s.IslandRumourMinimumGrandExpeditionCount.Value} are rendered. Cache and routing are unchanged.");
+            }
             { bool v = s.IslandRumourRowAccents.Value; if (ImGui.Checkbox("Colored row accents", ref v)) s.IslandRumourRowAccents.Value = v; }
             DrawColorEdit("Region stats text", s.IslandRumourRegionStatsColor.Value, c => s.IslandRumourRegionStatsColor.Value = c, false);
             { int v = s.IslandRumourRefreshMs.Value; if (ImGui.SliderInt("Button cache refresh (ms)", ref v, s.IslandRumourRefreshMs.Min, s.IslandRumourRefreshMs.Max)) s.IslandRumourRefreshMs.Value = v; }
